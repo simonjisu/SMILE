@@ -1,0 +1,5 @@
+{
+    "type": "tensorflow_datasets.core.features.features_dict.FeaturesDict",
+    "content": "{\n  \"features\": {\n    \"label\": {\n      \"pythonClassName\": \"tensorflow_datasets.core.features.class_label_feature.ClassLabel\",\n      \"classLabel\": {\n        \"numClasses\": \"1623\"\n      }\n    },\n    \"alphabet\": {\n      \"pythonClassName\": \"tensorflow_datasets.core.features.class_label_feature.ClassLabel\",\n      \"classLabel\": {\n        \"numClasses\": \"50\"\n      }\n    },\n    \"alphabet_char_id\": {\n      \"pythonClassName\": \"tensorflow_datasets.core.features.tensor_feature.Tensor\",\n      \"tensor\": {\n        \"shape\": {},\n        \"dtype\": \"int64\",\n        \"encoding\": \"none\"\n      }\n    },\n    \"image\": {\n      \"pythonClassName\": \"tensorflow_datasets.core.features.image_feature.Image\",\n      \"image\": {\n        \"shape\": {\n          \"dimensions\": [\n            \"105\",\n            \"105\",\n            \"3\"\n          ]\n        },\n        \"dtype\": \"uint8\",\n        \"encodingFormat\": \"png\"\n      }\n    }\n  }\n}",
+    "proto_cls": "tensorflow_datasets.FeaturesDict"
+}
