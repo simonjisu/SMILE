@@ -105,8 +105,9 @@ class MAML:
         # This method computes the inner loop (adaptation) procedure for one
         # task. It also scores the model along the way.
         # Make sure to populate accuracies and update parameters.
-        for imgs, label in support_data:
-            for _ in range(self._num_inner_steps):
+        
+        for _ in range(self._num_inner_steps + 1):
+            for imgs, label in support_data:
                 with tf.GradientTape() as tape:
                     logits = self.model(imgs, training=True)
                     loss = loss_fn(label, logits)
@@ -117,7 +118,7 @@ class MAML:
                 accuracies.append(metrics_fn.result().numpy())
         #####################################################
         assert phi != None
-        assert len(accuracies) == self._num_inner_steps # + 1
+        assert len(accuracies) == self._num_inner_steps + 1
 
         return phi, accuracies
 
@@ -154,27 +155,29 @@ class MAML:
         # and accuracy_query_batch.
         # Use keras.losses.SparseCategoricalCrossentropy to compute classification losses
         loss_fn = keras.losses.SparseCategoricalCrossentropy()
+        
         for task in task_batch:
             support, query = task
+            # support
             phi, accuracies = self._inner_loop(theta, support_data=support)
-
-            all_grads = tf.nest.map_structure(lambda x: tf.Variable(tf.zeros_like(x)), model.trainable_weights)
-            outer_loss = 0
-            metrics_fn.reset_states()
+            # query
+            query_loss = 0
+            all_grads = tf.nest.map_structure(lambda x: tf.Variable(tf.zeros_like(x)), self.model.trainable_weights)
             for imgs, label in query:
                 with tf.GradientTape() as tape:
                     logits = self.model(imgs, training=train)
                     loss = loss_fn(label, logits)
+                
                 grads = tape.gradient(loss, self.model.trainable_weights)
                 all_grads = tf.nest.map_structure(lambda x, y: x + y, all_grads, grads)
-                outer_loss += loss
+                query_loss += loss
                 metrics_fn.update_state(label, logits)
-                
-            self._optimizer.apply_gradients(zip(all_grads, theta))
 
             accuracies_support_batch.append(accuracies)
             accuracy_query_batch.append(metrics_fn.result().numpy())
-            outer_loss_batch.append(outer_loss)
+            outer_loss_batch.append(query_loss)
+
+        self._optimizer.apply_gradients(zip(all_grads, theta))
 
         #####################################################
         
@@ -369,5 +372,8 @@ if __name__ == '__main__':
                               'training, or for evaluation (-1 is ignored)'))
 
     args = parser.parse_args()
-    main(args)
+    from tensorflow.python.client import device_lib
+    print(device_lib.list_local_devices())
+    with tf.device('/device:GPU:0'):
+        main(args)
 

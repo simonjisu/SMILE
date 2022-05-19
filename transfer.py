@@ -144,7 +144,8 @@ class TransferLearning:
 
         for task in task_batch:
             support, query = task
-            
+            self.model.encoder.trainable = False
+            self.model.classification = layers.Dense(5, activation='softmax')
 
         #####################################################
         outer_loss = tf.reduce_mean(outer_loss_batch).numpy()
