@@ -105,17 +105,18 @@ class MAML:
         # This method computes the inner loop (adaptation) procedure for one
         # task. It also scores the model along the way.
         # Make sure to populate accuracies and update parameters.
-        
-        for _ in range(self._num_inner_steps + 1):
-            for imgs, label in support_data:
+        tf.nest.map_structure(lambda x, y: x.assign(y), self.model.trainable_weights, phi)
+        for imgs, label in support_data:
+            for _ in range(self._num_inner_steps + 1):
                 with tf.GradientTape() as tape:
                     logits = self.model(imgs, training=True)
                     loss = loss_fn(label, logits)
                 grads = tape.gradient(loss, self.model.trainable_weights)
                 opt_fn.apply_gradients(zip(grads, self.model.trainable_weights))
-                opt_fn.apply_gradients(zip(grads, phi))
+                # opt_fn.apply_gradients(zip(grads, phi))
                 metrics_fn.update_state(label, logits)
                 accuracies.append(metrics_fn.result().numpy())
+                metrics_fn.reset_states()
         #####################################################
         assert phi != None
         assert len(accuracies) == self._num_inner_steps + 1
@@ -155,29 +156,36 @@ class MAML:
         # and accuracy_query_batch.
         # Use keras.losses.SparseCategoricalCrossentropy to compute classification losses
         loss_fn = keras.losses.SparseCategoricalCrossentropy()
-        
+        num_tasks = 0
+        all_grads = tf.nest.map_structure(lambda x: tf.Variable(tf.zeros_like(x)), self.model.trainable_weights)
+
         for task in task_batch:
+            num_tasks += 1
             support, query = task
             # support
             phi, accuracies = self._inner_loop(theta, support_data=support)
+            
             # query
             query_loss = 0
-            all_grads = tf.nest.map_structure(lambda x: tf.Variable(tf.zeros_like(x)), self.model.trainable_weights)
+            metrics_fn.reset_states()
             for imgs, label in query:
                 with tf.GradientTape() as tape:
-                    logits = self.model(imgs, training=train)
+                    logits = self.model(imgs, training=True)
                     loss = loss_fn(label, logits)
-                
-                grads = tape.gradient(loss, self.model.trainable_weights)
-                all_grads = tf.nest.map_structure(lambda x, y: x + y, all_grads, grads)
+
                 query_loss += loss
                 metrics_fn.update_state(label, logits)
+
+                grads = tape.gradient(loss, self.model.trainable_weights)
+                all_grads = tf.nest.map_structure(lambda x, y: x + y, all_grads, grads)
 
             accuracies_support_batch.append(accuracies)
             accuracy_query_batch.append(metrics_fn.result().numpy())
             outer_loss_batch.append(query_loss)
 
-        self._optimizer.apply_gradients(zip(all_grads, theta))
+        all_grads = [x / len(query)*num_tasks for x in all_grads]
+        if train:
+            self._optimizer.apply_gradients(zip(all_grads, theta))
 
         #####################################################
         

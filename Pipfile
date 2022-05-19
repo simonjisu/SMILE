@@ -9,6 +9,7 @@ matplotlib = "*"
 ipykernel = "*"
 tensorflow-datasets = "*"
 ipywidgets = "*"
+tensorboard = "*"
 
 [dev-packages]
 

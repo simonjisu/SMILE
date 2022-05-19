@@ -14,8 +14,6 @@ tf.random.set_seed(SEED)
 
 from dataloader import DataLoader
 
-
-
 NUM_CONV_LAYERS = 4
 SAVE_INTERVAL = 100
 LOG_INTERVAL = 1
@@ -141,11 +139,31 @@ class TransferLearning:
         # compute the loss and other metrics.
         # Make sure to populate outer_loss_batch, accuracies_support_batch,
         # and accuracy_query_batch.
-
+        prediction_layer = layers.Dense(5, activation='softmax')
+        model = keras.Sequential([keras.Input(shape=(28, 28, 1)), feature_extractor, prediction_layer])
+        model.compile(
+            optimizer=opt_fn, 
+            loss=loss_fn,
+            metrics=metrics_fn
+        )
         for task in task_batch:
             support, query = task
-            self.model.encoder.trainable = False
-            self.model.classification = layers.Dense(5, activation='softmax')
+            history = model.fit(
+                support, 
+                epochs=self._num_inner_steps,
+                validation_data=query,
+                verbose=0
+            )
+            acc = history.history['Accuracy']
+            val_acc = history.history['val_Accuracy'][-1]
+            val_loss = history.history['val_loss'][-1]
+
+            outer_loss_batch.append(val_loss)
+            accuracies_support_batch.append(acc)
+            accuracy_query_batch.append(val_acc)
+            metrics_fn.reset_states()
+
+        feature_extractor.trainable = True
 
         #####################################################
         outer_loss = tf.reduce_mean(outer_loss_batch).numpy()
