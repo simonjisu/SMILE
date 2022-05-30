@@ -1,0 +1,17 @@
+
+data_dir: "../data"
+dtype: "kdd17"
+n_train_stock: 40  # number of training stocks to construct the universe
+n_sample: 5  # number of samples per window size and per single stock
+n_lag: 1
+n_stock: 3  # number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
+show_y_index: false  # for debug purpose
+
+feature_size: 11
+hidden_size:  20 
+output_size:  1  # 1 == 2 setting
+num_layers:  1
+has_same_dist_on_time: false
+drop_rate:  0.2
+
+n_inner_step: 5
