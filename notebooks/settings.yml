@@ -5,6 +5,7 @@ n_train_stock: 40  # number of training stocks to construct the universe
 n_sample: 5  # number of samples per window size and per single stock
 n_lag: 1
 n_stock: 3  # number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
+drop_unchange: true  # drop unchanged labels
 show_y_index: false  # for debug purpose
 
 # Model
