@@ -10,18 +10,20 @@ show_y_index: false  # for debug purpose
 
 # Model
 feature_size: 11
-hidden_size: 20 
+hidden_size: 50 
 output_size: 1  # 1 == 2 setting
 num_layers: 1
-drop_rate: 0.2
+drop_rate: 0.3
 inner_lr_init: 0.1
 finetuning_lr_init: 0.1
 
 # Trainer
 log_dir: './logging'
-total_steps: 20
+total_steps: 100
 n_inner_step: 5
 n_finetuning_step: 5
+n_valid_step: 5
+every_valid_step: 5
 beta: 0.001
 gamma: 1.0e-9
 lambda1: 1.0e-8
