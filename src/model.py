@@ -101,7 +101,7 @@ class MetaModel(nn.Module):
         return mean + std*z, dist
 
     def decode(self, z):
-        param_hs = self.decoder(z)
+        param_hs = self.decoder(z)  # check the distribution in params_hs?
         parameters, _ = self.sample(param_hs, size=self.parameter_size)
         return parameters
 
