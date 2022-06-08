@@ -15,7 +15,7 @@ def main(args):
     data_kwargs = meta_args.get_args(cls=MetaStockDataset)
     if not args.meta_test:
         meta_trainset = MetaStockDataset(meta_type='train', meta_train_stocks=None, **data_kwargs)
-        
+        print(meta_trainset.data_dir)
         model_kwargs = meta_args.get_args(cls=MetaModel)
         model = MetaModel(**model_kwargs)
 

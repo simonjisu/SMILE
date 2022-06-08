@@ -65,7 +65,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.keep_support_history = keep_support_history
         self.show_y_index = show_y_index
         # data config
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(data_dir).absolute()
         ds_info = {
             # train: (Jan-01-2007 to Jan-01-2015)
             # val: (Jan-01-2015 to Jan-01-2016)
@@ -97,7 +97,8 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
         # get data
         self.data = {}
-        for i, p in enumerate((self.data_dir / ds_config['path']).glob('*')):
+        for i, p in enumerate((self.data_dir / ds_config['path']).glob('*.csv')):
+           
             if meta_type == 'train' and (i == n_train_stock):
                 # stop when it reach `n_train_stock`
                 break

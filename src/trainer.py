@@ -42,8 +42,8 @@ class Trainer():
         # check if exp exists
         self.exp_name = exp_name
         self.log_dir = Path(log_dir)
-        exp_dirs = list(self.log_dir.glob(self.exp_name))
-        exp_num = exp_dirs[-1].name[len(self.exp_name)+1:] if exp_dirs else 0
+        exp_dirs = list(self.log_dir.glob(f'{self.exp_name}_*'))
+        exp_num = int(exp_dirs[-1].name[len(self.exp_name)+1:]) if exp_dirs else 0
         self.exp_dir = self.log_dir / f'{self.exp_name}_{exp_num+1}'
         self.writer = SummaryWriter(str(self.exp_dir))
         self.ckpt_path = self.exp_dir / 'checkpoints'
