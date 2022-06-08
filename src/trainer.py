@@ -7,6 +7,7 @@ from torch.utils.tensorboard import SummaryWriter
 class Trainer():
     def __init__(
             self, 
+            exp_name, 
             log_dir, 
             total_steps,
             n_inner_step, 
@@ -39,10 +40,11 @@ class Trainer():
         
 
         # check if exp exists
+        self.exp_name = exp_name
         self.log_dir = Path(log_dir)
-        exp_dirs = list(self.log_dir.glob('exp'))
-        exp_num = exp_dirs[-1].name[3:] if exp_dirs else 1
-        self.exp_dir = self.log_dir / f'exp{exp_num}'
+        exp_dirs = list(self.log_dir.glob(self.exp_name))
+        exp_num = exp_dirs[-1].name[len(self.exp_name)+1:] if exp_dirs else 0
+        self.exp_dir = self.log_dir / f'{self.exp_name}_{exp_num+1}'
         self.writer = SummaryWriter(str(self.exp_dir))
         self.ckpt_path = self.exp_dir / 'checkpoints'
         if not self.ckpt_path.exists():
@@ -81,7 +83,7 @@ class Trainer():
         # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
         for module in model.children():
             # model.training = mode
-            if isinstance(module, nn.Dropout):
+            if isinstance(module, nn.Dropout) or isinstance(module, nn.LayerNorm):
                 module.train(mode)
         return model
 

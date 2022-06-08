@@ -46,7 +46,7 @@ class MappingNet(nn.Module):
         outputs = self.rn(x)
         return outputs
 
-class Model(nn.Module):
+class MetaModel(nn.Module):
     def __init__(
             self, 
             feature_size: int, 

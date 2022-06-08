@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import List, Any, Generator
+from typing import Dict, List, Any, Generator
 
 from collections import defaultdict
 
@@ -88,7 +88,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
                 'test_date': '2016-01-01',
             }
         }
-        
         ds_config = ds_info[dtype]
 
         self.window_sizes = [5, 10, 15, 20]
@@ -180,7 +179,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             all_tasks[window_size] = tasks
         return all_tasks
 
-    def generate_tasks_per_window_size(self, window_size):
+    def generate_tasks_per_window_size(self, window_size: int):
         # tasks: {X: (n_stock, n_sample, window_size, n_in), y: (n_stock, n_sample)}
         tasks = defaultdict(list)
         for i in range(self.n_stock):
@@ -195,7 +194,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
         return tasks
 
-    def generate_task_per_window_size_and_single_stock(self, symnbol, window_size):
+    def generate_task_per_window_size_and_single_stock(self, symnbol: str, window_size: int):
         df_stock = self.data[symnbol]
         # condition: only continious rise or fall
         condition = df_stock['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
@@ -218,7 +217,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             'query': query, 'query_labels': query_labels
         }
 
-    def generate_data(self, df, y_start, y_end):
+    def generate_data(self, df: pd.DataFrame, y_start: np.ndarray, y_end: np.ndarray):
         # generate mini task
         inputs = []
         labels = []
@@ -232,7 +231,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         # inputs: (n_sample, y_end-y_start, n_in), labels: (n_sample,)
         return inputs, labels
 
-    def map_to_tensor(self, tasks, device: None | str=None):
+    def map_to_tensor(self, tasks: Dict[str, Any], device: None | str=None):
         if device is None:
             device = torch.device('cpu')
         else:
