@@ -96,7 +96,7 @@ class Trainer():
         params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]
         lr_params = [x[1] for x in list(filter(lambda k: k[0] in lr_list, model.named_parameters()))]
         optim = torch.optim.Adam(params, lr=self.outer_lr, weight_decay=self.lambda1)
-        optim_lr = torch.optim.Adam(lr_params, lr=self.outer_lr)
+        optim_lr = torch.optim.Adam(lr_params, lr=self.outer_lr, weight_decay=self.lambda1)
         best_eval_acc = 0.0
 
         for step in range(self.total_steps):
@@ -153,8 +153,8 @@ class Trainer():
             if (step % self.every_valid_step == 1) or (step == self.total_steps-1):
                 # [PyTorch Issue] RuntimeError: cudnn RNN backward can only be called in training mode
                 # cannot use model.eval()
-                model = self.manual_model_eval(model, mode=False)
-
+                # model = self.manual_model_eval(model, mode=False)
+                model.manual_model_eval(False)
                 valid_records = {'Accuracy': [], 'Loss': []}
                 # n_valid_step x window_size 
                 for val_step in range(self.n_valid_step):

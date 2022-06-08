@@ -36,9 +36,9 @@ class MappingNet(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.rn = nn.Sequential(
-            nn.Linear(hidden_size, 2*hidden_size, bias=True),
-            nn.ReLU(),
-            nn.Linear(2*hidden_size, 2*hidden_size, bias=True),
+            nn.Linear(hidden_size, 2*hidden_size, bias=False),
+            nn.ReLU(),# nn.LeakyReLU(),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
         )
 
     def forward(self, x: torch.tensor):
@@ -69,8 +69,8 @@ class MetaModel(nn.Module):
 
         # Network
         self.dropout = nn.Dropout(drop_rate)
-        # self.feature_transform = nn.Linear(feature_size, hidden_size)
-        self.lstm = LSTMAttention(feature_size, hidden_size, num_layers)  # encode
+        self.feature_transform = nn.Linear(feature_size, hidden_size)
+        self.lstm = LSTMAttention(hidden_size, hidden_size, num_layers)  # encode
         self.mapping_net = MappingNet(hidden_size)  # to generate z(latent)
         self.decoder = nn.Linear(hidden_size, 2*self.parameter_size, bias=False)
         self.prob_layer = nn.LogSoftmax(dim=1) if output_size >=2 else nn.LogSigmoid()
@@ -80,8 +80,8 @@ class MetaModel(nn.Module):
 
     def encode(self, inputs, rt_attn: bool=False):
         # inputs: (B, T, I)
-        # inputs = self.dropout(inputs)
-        # inputs = self.feature_transform(inputs)
+        inputs = self.feature_transform(inputs)
+        inputs = self.dropout(inputs)
         encoded, attn = self.lstm(inputs, rt_attn)  # B, H
         return encoded, attn
 
@@ -89,6 +89,8 @@ class MetaModel(nn.Module):
         # inputs: (B, T, I)
         # encoded: (B, H)
         encoded, attn = self.encode(inputs, rt_attn=rt_attn)
+        # Relation Network?
+        # each class is different
         hs = self.mapping_net(encoded)
 
         z, dist = self.sample(hs, size=self.hidden_size)
@@ -172,13 +174,13 @@ class MetaModel(nn.Module):
             support_log_probs = self.predict(support_encoded, parameters)
             train_loss = self.loss_fn(support_log_probs, support_y)
 
-
-        # meta validation     
+        # meta validation
+        self.manual_model_eval(False)
         query_encoded, *_, query_attn = self.encode(query_X, rt_attn=rt_attn)
         query_log_probs = self.predict(query_encoded, parameters)
         query_loss = self.loss_fn(query_log_probs, query_y)
         query_acc = self.cal_accuracy(query_log_probs, query_y)
-
+        self.train()
         return query_loss, query_acc, query_attn
 
     def cal_kl_div(self, dist, z):
@@ -239,3 +241,12 @@ class MetaModel(nn.Module):
             self.records['Support Attn'] = support_attn.detach().cpu().numpy()
 
         return total_loss, self.records
+
+    def manual_model_eval(self, mode=False):
+        # [PyTorch Issue] RuntimeError: cudnn RNN backward can only be called in training mode
+        # cannot use model.eval()
+        # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
+        for module in self.children():
+            # model.training = mode
+            if isinstance(module, nn.Dropout): # or isinstance(module, nn.LayerNorm):
+                module.train(mode)
