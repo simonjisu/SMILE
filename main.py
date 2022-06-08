@@ -15,6 +15,7 @@ def main(args):
     data_kwargs = meta_args.get_args(cls=MetaStockDataset)
     if not args.meta_test:
         meta_trainset = MetaStockDataset(meta_type='train', meta_train_stocks=None, **data_kwargs)
+        
         model_kwargs = meta_args.get_args(cls=MetaModel)
         model = MetaModel(**model_kwargs)
 
@@ -32,3 +33,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--exp', default='', type=str)
     parser.add_argument('--meta_test', action='store_true')
+    args = parser.parse_args()
+    main(args)
