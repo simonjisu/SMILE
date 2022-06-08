@@ -61,8 +61,11 @@ class Trainer():
             device = torch.device(device)
         tensor_tasks = {}
         for k, v in tasks.items():
-            tensor = torch.LongTensor if 'labels' in k else torch.FloatTensor
-            tensor_tasks[k] = tensor(np.array(v)).to(device)
+            tensor_fn = torch.LongTensor if 'labels' in k else torch.FloatTensor
+            tensor = tensor_fn(np.array(v))
+            if ('labels' not in k) and tensor.ndim == 1:
+                tensor = tensor.view(1, -1)
+            tensor_tasks[k] = tensor.to(device)
         return tensor_tasks
 
     def step_batch(self, model, batch_data):
@@ -103,24 +106,40 @@ class Trainer():
             optim_lr.zero_grad()
             train_tasks = meta_trainset.generate_tasks()
             train_records = {k: [] for k in self.log_keys}
-            for window_size, tasks in train_tasks.items():
+            
+            all_total_loss = 0.
+            for window_size, tasks in train_tasks.items(): # window size x (n_sample * n_stock)
                 batch_data = self.map_to_tensor(tasks, device=self.device)
                 total_loss, records = self.step_batch(model, batch_data)
-                total_loss.backward()
-                nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
-                nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
-                optim.step()
-                optim_lr.step()
+                # version - 2
+                all_total_loss += total_loss
                 for key, v in records.items():
                     if (key in ['Latents']):
-                        self.writer.add_histogram(f'Latents-WinSize={window_size}', records['Latents'], step)
+                        continue
                     else:
                         train_records[key].append(v)
-                        self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
+            all_total_loss.backward()
+            nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
+            nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
+            optim.step()
+            optim_lr.step()
+                # version - 1
+                # total_loss.backward()
+
+                # nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
+                # nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
+                # optim.step()
+                # optim_lr.step()
+                # for key, v in records.items():
+                #     if (key in ['Latents']):
+                #         self.writer.add_histogram(f'Latents-WinSize={window_size}', records['Latents'], step)
+                #     else:
+                #         train_records[key].append(v)
+                #         self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
                 
             # logging summary(average score for all window size tasks)
-            for key in self.log_keys:
-                self.writer.add_scalar(f'Train-{key}', np.mean(train_records[key]), step)
+            # for key in self.log_keys:
+            #     self.writer.add_scalar(f'Train-{key}', np.mean(train_records[key]), step)
                 
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 print(f'[Meta Train]({step+1}/{self.total_steps})')
@@ -142,6 +161,7 @@ class Trainer():
                     valid_step_loss = []
                     valid_step_acc = []
                     valid_tasks = meta_trainset.generate_tasks()
+
                     for window_size, tasks in valid_tasks.items():
                         batch_data = self.map_to_tensor(tasks, device=self.device)
                         _, records = self.step_batch(model, batch_data)
@@ -149,15 +169,15 @@ class Trainer():
                         valid_step_acc.append(records['Query Accuracy'])
 
                     valid_records['Accuracy'].append(valid_step_acc)
-                    valid_records['Loss'].append(valid_step_acc)
+                    valid_records['Loss'].append(valid_step_loss)
                 # average window loss and accruacy: mean by n_valid_step
                 valid_records['Accuracy'] = np.mean(valid_records['Accuracy'], axis=0)
                 valid_records['Loss'] = np.mean(valid_records['Loss'], axis=0)
 
-                for key in ['Accuracy', 'Loss']:
-                    for i, window_size in enumerate(meta_trainset.window_sizes):
-                        self.writer.add_scalar(f'Valid-WinSize={window_size}-{key}', valid_records[key][i], step)
-                    self.writer.add_scalar(f'Valid-Task {key}', np.mean(valid_records[key]), step)
+                # for key in ['Accuracy', 'Loss']:
+                #     for i, window_size in enumerate(meta_trainset.window_sizes):
+                #         self.writer.add_scalar(f'Valid-WinSize={window_size}-{key}', valid_records[key][i], step)
+                #     self.writer.add_scalar(f'Valid-Task {key}', np.mean(valid_records[key]), step)
 
                 print(f'[Meta Valid]({step+1}/{self.total_steps})')
                 for key in ['Accuracy', 'Loss']:

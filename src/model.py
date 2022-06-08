@@ -36,9 +36,9 @@ class MappingNet(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.rn = nn.Sequential(
-            nn.Linear(hidden_size, 2*hidden_size, bias=False),
+            nn.Linear(hidden_size, 2*hidden_size, bias=True),
             nn.ReLU(),
-            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=True),
         )
 
     def forward(self, x: torch.tensor):
@@ -69,8 +69,8 @@ class MetaModel(nn.Module):
 
         # Network
         self.dropout = nn.Dropout(drop_rate)
-        self.feature_transform = nn.Linear(feature_size, hidden_size)
-        self.lstm = LSTMAttention(hidden_size, hidden_size, num_layers)  # encode
+        # self.feature_transform = nn.Linear(feature_size, hidden_size)
+        self.lstm = LSTMAttention(feature_size, hidden_size, num_layers)  # encode
         self.mapping_net = MappingNet(hidden_size)  # to generate z(latent)
         self.decoder = nn.Linear(hidden_size, 2*self.parameter_size, bias=False)
         self.prob_layer = nn.LogSoftmax(dim=1) if output_size >=2 else nn.LogSigmoid()
@@ -80,13 +80,14 @@ class MetaModel(nn.Module):
 
     def encode(self, inputs, rt_attn: bool=False):
         # inputs: (B, T, I)
-        inputs = self.dropout(inputs)
-        inputs = self.feature_transform(inputs)
+        # inputs = self.dropout(inputs)
+        # inputs = self.feature_transform(inputs)
         encoded, attn = self.lstm(inputs, rt_attn)  # B, H
         return encoded, attn
 
     def get_z(self, inputs, rt_attn: bool=False):
         # inputs: (B, T, I)
+        # encoded: (B, H)
         encoded, attn = self.encode(inputs, rt_attn=rt_attn)
         hs = self.mapping_net(encoded)
 
@@ -101,6 +102,8 @@ class MetaModel(nn.Module):
         return mean + std*z, dist
 
     def decode(self, z):
+        # z: (B, H)
+        # param_hs: (B, 2*H)
         param_hs = self.decoder(z)  # check the distribution in params_hs?
         parameters, _ = self.sample(param_hs, size=self.parameter_size)
         return parameters
@@ -145,10 +148,10 @@ class MetaModel(nn.Module):
 
     def outer_loop(self, data, support_z, support_encoded, n_finetuning_step: int=5, rt_attn: bool=False):
         # finetuning inner + validation
-        
+        # support_z: (B, H)
         # inner loop prediction
         support_y, query_X, query_y = data['support_labels'], data['query'], data['query_labels']
-        parameters = self.decode(support_z)
+        parameters = self.decode(support_z)  # parameters: (B, H)
         parameters.retain_grad()
         support_log_probs = self.predict(support_encoded, parameters)
         train_loss = self.loss_fn(support_log_probs, support_y)
