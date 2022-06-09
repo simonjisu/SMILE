@@ -112,12 +112,13 @@ class Trainer():
 
         for step in range(self.total_steps):
             # Meta Train
-            model.train()
+            model.meta_train()
             optim.zero_grad()
             optim_lr.zero_grad()
             train_tasks = meta_trainset.generate_tasks()
             train_records = {k: [] for k in self.log_keys.keys()}
             
+            # Outer Loop
             all_total_loss = 0.
             for window_size, tasks in train_tasks.items(): # window size x (n_sample * n_stock)
                 batch_data = self.map_to_tensor(tasks, device=self.device)
@@ -151,10 +152,9 @@ class Trainer():
                 
             # Meta Valid
             if (step % self.every_valid_step == 1) or (step == self.total_steps-1):
-                # [PyTorch Issue] RuntimeError: cudnn RNN backward can only be called in training mode
-                # cannot use model.eval()
+                # turn-off dropout and sample by mean
+                # model.meta_valid()
                 model.manual_model_eval()
-
                 valid_records = {'Accuracy': [], 'Loss': []}  # n_valid_step x window_size 
                 for val_step in range(self.n_valid_step):
                     valid_step_loss = []
