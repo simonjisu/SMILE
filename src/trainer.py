@@ -56,6 +56,7 @@ class Trainer():
             'Support Accuracy': np.mean, 
             'Query Loss': np.sum, 
             'Query Accuracy': np.mean, 
+            'Total Loss': np.sum,
             'Inner LR': np.mean,  # average Learing Rate
             'Finetuning LR': np.mean, 
             'KLD Loss': np.sum, 
@@ -136,7 +137,7 @@ class Trainer():
             optim_lr.step()
 
             # logging summary(aggregate score for all window size tasks)
-            for key, agg_func in self.log_keys.item():
+            for key, agg_func in self.log_keys.items():
                 self.writer.add_scalar(f'Train-{key}', agg_func(train_records[key]), step)
 
             if (step % self.print_step == 0) or (step == self.total_steps-1):

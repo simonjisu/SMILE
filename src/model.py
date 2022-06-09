@@ -36,9 +36,9 @@ class MappingNet(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.rn = nn.Sequential(
-            nn.Linear(hidden_size, 2*hidden_size, bias=False),
+            nn.Linear(hidden_size, 2*hidden_size, bias=True),
             nn.ReLU(),
-            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=True),
         )
 
     def forward(self, x: torch.tensor):
