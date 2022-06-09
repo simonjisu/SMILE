@@ -32,6 +32,20 @@ class LSTMAttention(nn.Module):
         else:
             return normed_context, None
 
+class MappingNet(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.rn = nn.Sequential(
+            nn.Linear(hidden_size, 2*hidden_size, bias=False),
+            nn.ReLU(),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
+        )
+
+    def forward(self, x: torch.tensor):
+        # x: (B, H)
+        outputs = self.rn(x)
+        return outputs
+
 class MetaModel(nn.Module):
     def __init__(
             self, 
@@ -236,6 +250,6 @@ class MetaModel(nn.Module):
         # cannot use model.eval()
         # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
         for module in self.children():
-            model.training = mode
+            self.training = mode
             if isinstance(module, nn.Dropout): # or isinstance(module, nn.LayerNorm):
                 module.train(mode)

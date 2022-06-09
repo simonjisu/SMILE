@@ -4,14 +4,14 @@ dtype: "kdd17"
 n_train_stock: 40  # number of training stocks to construct the universe
 n_sample: 5  # number of samples per window size and per single stock
 n_lag: 1
-n_stock: 3  # number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
+n_stock: 10  # number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
 keep_support_history: false  # query data will starting from support starting date
 show_y_index: false  # for debug purpose
 
 # Model
 feature_size: 11  # no need to change this
 hidden_size: 100 
-output_size: 2  # 1 == 2 setting
+output_size: 1  # 1 == 2 setting
 num_layers: 1
 drop_rate: 0.0  # no use
 inner_lr_init: 0.1
