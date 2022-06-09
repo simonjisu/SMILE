@@ -1,4 +1,5 @@
 import argparse
+import yaml
 from pathlib import Path
 
 from src.dataset import MetaStockDataset
@@ -11,7 +12,8 @@ def main(args):
     setting_file = args.exp
     if '.yml' not in args.exp:
         setting_file += '.yml'
-    meta_args = ARGProcessor(setting_file=Path('./experiments') / setting_file)
+    setting_file = Path('./experiments') / setting_file
+    meta_args = ARGProcessor(setting_file=setting_file)
     data_kwargs = meta_args.get_args(cls=MetaStockDataset)
     if not args.meta_test:
         meta_trainset = MetaStockDataset(meta_type='train', **data_kwargs)
@@ -22,7 +24,8 @@ def main(args):
         trainer_kwargs = meta_args.get_args(cls=Trainer)
         trainer = Trainer(**trainer_kwargs)
         trainer.meta_train(model, meta_trainset=meta_trainset)
-
+        meta_args.save(trainer.exp_dir / 'settings.yml', meta_args)
+        
     else:
         meta_test1 = MetaStockDataset(meta_type='test1', **data_kwargs)
         meta_test2 = MetaStockDataset(meta_type='test2', **data_kwargs)

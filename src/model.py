@@ -148,7 +148,7 @@ class MetaModel(nn.Module):
             scores = self.predict(support_encoded, parameters)
             train_loss = self.loss_fn(scores, support_y)
             train_loss.backward(retain_graph=True)
-            z_prime = z_prime - self.inner_lr * z_prime.grad.data.detach()
+            z_prime = z_prime - self.inner_lr * z_prime.grad.data
 
         z_penalty = torch.mean((z_prime.detach() - support_z)**2)
 

@@ -38,7 +38,6 @@ class Trainer():
         self.outer_lr = outer_lr
         self.clip_value = clip_value
         
-
         # check if exp exists
         self.exp_name = exp_name
         self.log_dir = Path(log_dir).resolve()

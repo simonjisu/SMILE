@@ -10,6 +10,10 @@ class ARGProcessor():
     def load(self):
         with open(self.setting_file) as file:
             self.kwargs = yaml.load(file, Loader=yaml.FullLoader)
+
+    def save(self, path, obj):
+        with open(path) as file:
+            yaml.dump(obj)
     
     def get_args(self, cls):
         cls_kwargs = {
