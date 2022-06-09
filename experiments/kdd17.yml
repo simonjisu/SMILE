@@ -21,15 +21,15 @@ finetuning_lr_init: 0.1
 exp_name: 'kdd'
 log_dir: './logging'
 total_steps: 500
-n_inner_step: 5
+n_inner_step: 20
 n_finetuning_step: 0
 n_valid_step: 5
 every_valid_step: 10
 beta: 0.001  # KLD Loss
-gamma: 1.0e-9  # z penalty
+gamma: 1.0e-3  # z penalty
 lambda1: 1.0e-3  # weight decay
 lambda2: 0.1
-outer_lr: 0.01
-clip_value: 0.1
+outer_lr: 0.001
+clip_value: 0.5
 device: 'cuda'
 print_step: 5

@@ -47,6 +47,11 @@ class MappingNet(nn.Module):
         return outputs
 
 class MetaModel(nn.Module):
+    """Meta Model
+    Structure Ref: 
+    * LEO-Deepmind: https://github.com/deepmind/leo/blob/de9a0c2a77dd7a42c1986b1eef18d184a86e294a/model.py#L256
+    * LEO-pytorch: https://github.com/timchen0618/pytorch-leo/blob/master/model.py
+    """
     def __init__(
             self, 
             feature_size: int, 
@@ -58,6 +63,7 @@ class MetaModel(nn.Module):
             inner_lr_init: float,
             finetuning_lr_init: float
         ):
+        
         super().__init__()
         self.hidden_size = hidden_size
         self.output_size = output_size
@@ -132,7 +138,7 @@ class MetaModel(nn.Module):
         support_encoded, support_z, support_dist, support_attn = self.get_z(support_X, rt_attn=rt_attn)
         kld_loss = self.cal_kl_div(support_dist, support_z)
 
-        # z_init = z' , parameters = \theta^'_i
+        # initialize z'
         z_prime = support_z  
 
         # inner adaptation to z
@@ -146,7 +152,7 @@ class MetaModel(nn.Module):
 
         z_penalty = torch.mean((z_prime.detach() - support_z)**2)
 
-        parameters = self.decode(z_prime)  # parameters: (B, H)
+        parameters = self.decode(z_prime)  # \theta^'_i: parameters: (B, H)
         parameters.retain_grad()
         scores = self.predict(support_encoded, parameters)
         train_loss = self.loss_fn(scores, support_y)
@@ -156,7 +162,8 @@ class MetaModel(nn.Module):
         self.records['Support Accuracy'] = train_acc.item()
         self.records['Inner LR'] = float(self.inner_lr)
         self.records['Finetuning LR'] = float(self.finetuning_lr)
-        self.records['Latents'] = z_prime.detach().cpu().numpy()
+        self.records['Z Prime'] = z_prime.detach().cpu().numpy()
+        self.records['Z'] = support_z.detach().cpu().numpy()
 
         # finetuning adaptation to parameters
         if n_finetuning_step > 0:
@@ -169,7 +176,10 @@ class MetaModel(nn.Module):
             finetune_train_acc = self.cal_accuracy(scores, support_y)
             self.records['Finetune Loss'] = train_loss.item()
             self.records['Finetune Accuracy'] = finetune_train_acc.item()
-
+        else:
+            self.records['Finetune Loss'] = 0.0
+            self.records['Finetune Accuracy'] = 0.0
+            
         return parameters, kld_loss, z_penalty, support_attn
 
     def outer_loop(self, data, parameters, rt_attn: bool=False):

@@ -55,7 +55,9 @@ class Trainer():
             'Support Loss': np.sum, 
             'Support Accuracy': np.mean, 
             'Query Loss': np.sum, 
-            'Query Accuracy': np.mean, 
+            'Query Accuracy': np.mean,
+            'Finetune Loss': np.sum,
+            'Finetune Accuracy': np.mean,
             'Total Loss': np.sum,
             'Inner LR': np.mean,  # average Learing Rate
             'Finetuning LR': np.mean, 
@@ -124,8 +126,8 @@ class Trainer():
                 # version - 2
                 all_total_loss += total_loss
                 for key, v in records.items():
-                    if (key in ['Latents']):
-                        self.writer.add_histogram(f'Latents-WinSize={window_size}', records['Latents'], step)
+                    if (key in ['Z', 'Z Prime']):
+                        self.writer.add_histogram(f'{key}-WinSize={window_size}', records['Latents'], step)
                     else:
                         train_records[key].append(v)
                         self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
@@ -143,8 +145,8 @@ class Trainer():
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 print(f'[Meta Train]({step+1}/{self.total_steps})')
                 for i, (key, agg_func) in enumerate(self.log_keys.items()):
-                    s1 = '  ' if (i == 0) or (i == 4) else ''
-                    s2 = '\n' if i == 3 else " | "
+                    s1 = '  ' if (i == 0) or (i == 6) else ''
+                    s2 = '\n' if (i == 5) else " | "
                     print(f'{s1}{key}: {agg_func(train_records[key]):.4f}', end=s2)
                 print()
                 
