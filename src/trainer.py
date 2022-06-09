@@ -127,7 +127,7 @@ class Trainer():
                 all_total_loss += total_loss
                 for key, v in records.items():
                     if (key in ['Z', 'Z Prime']):
-                        self.writer.add_histogram(f'{key}-WinSize={window_size}', records['Latents'], step)
+                        self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
                     else:
                         train_records[key].append(v)
                         self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
