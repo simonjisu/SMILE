@@ -11,7 +11,7 @@ class LSTM(nn.Module):
     def forward(self, x: torch.tensor):
         # x: (B, T, I)
         o, (h, _) = self.lstm(x) # o: (B, T, H) / h: (1, B, H)
-        normed_context = self.lnorm(h)
+        normed_context = self.lnorm(h[-1, :, :])
         return normed_context
 
 class LSTMAttention(nn.Module):
@@ -23,7 +23,8 @@ class LSTMAttention(nn.Module):
     def forward(self, x: torch.tensor, rt_attn: bool=False):
         # x: (B, T, I)
         o, (h, _) = self.lstm(x) # o: (B, T, H) / h: (1, B, H)
-        score = torch.bmm(o, h.permute(1, 2, 0)) # (B, T, H) x (B, H, 1)
+        h = h[-1, :, :]  # (B, H)
+        score = torch.bmm(o, h.unsqueeze(-1)) # (B, T, H) x (B, H, 1)
         attn = torch.softmax(score, 1).squeeze(-1)  # (B, T)
         context = torch.bmm(attn.unsqueeze(1), o).squeeze(1)  # (B, 1, T) x (B, T, H)
         normed_context = self.lnorm(context)  # (B, H)
