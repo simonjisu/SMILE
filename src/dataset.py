@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Any, Generator
-
+from tqdm import tqdm
 from collections import defaultdict
 
 def flatten(li: List[Any]) -> Generator:
@@ -30,7 +30,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
     def __init__(
             self, 
             meta_type: str ='train', 
-            meta_train_stocks: List[str] | None =None,
             data_dir: Path | str ='', 
             dtype: str ='kdd17', 
             n_train_stock: int =40, 
@@ -65,7 +64,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.keep_support_history = keep_support_history
         self.show_y_index = show_y_index
         # data config
-        self.data_dir = Path(data_dir).absolute()
+        self.data_dir = Path(data_dir).resolve()
         ds_info = {
             # train: (Jan-01-2007 to Jan-01-2015)
             # val: (Jan-01-2015 to Jan-01-2016)
@@ -97,36 +96,35 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
         # get data
         self.data = {}
-        for i, p in enumerate((self.data_dir / ds_config['path']).glob('*.csv')):
-           
-            if meta_type == 'train' and (i == n_train_stock):
-                # stop when it reach `n_train_stock`
-                break
-            
+        self.candidates = {}
+        ps = list((self.data_dir / ds_config['path']).glob('*.csv'))
+        iterator = ps[:n_train_stock] if meta_type == 'train' else ps[n_train_stock:]
+        for p in tqdm(iterator, total=len(iterator), desc='Processing data and candidates'):    
             stock_symbol = p.name.rstrip('.csv')
             df_single = self.load_single_stock(p)
             if meta_type == 'train':
-                df_single = df_single.loc[df_single['date'] <= ds_config['val_date']]
+                df_single = df_single.loc[df_single['date'] <= ds_config['val_date']].reset_index(drop=True)
+                labels_indices = self.get_candidates(df_single)
             else:
                 if meta_type == 'test1':
-                    if stock_symbol in meta_train_stocks:
-                        df_single = df_single.loc[df_single['date'] > ds_config['val_date']]
-                    else:
-                        continue
+                    df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
+                    labels_indices = self.get_candidates(df_single)
                 elif meta_type == 'test2':
-                    if stock_symbol not in meta_train_stocks:
-                        df_single = df_single.loc[df_single['date'] <= ds_config['val_date']]
-                    else:
-                        continue
+                        df_single = df_single.loc[df_single['date'] <= ds_config['val_date']].reset_index(drop=True)
+                        labels_indices = self.get_candidates(df_single)
                 elif meta_type == 'test3':
-                    if stock_symbol not in meta_train_stocks:
-                        df_single = df_single.loc[df_single['date'] > ds_config['val_date']]
-                    else:
-                        continue
+                        df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
+                        labels_indices = self.get_candidates(df_single)
                 else:
                     raise KeyError('Error argument `meta_type`, should be in (train, test1, test2, test3)')
 
-            self.data[stock_symbol] = df_single.reset_index(drop=True)
+            self.data[stock_symbol] = df_single
+            self.candidates[stock_symbol] = labels_indices
+
+    def get_candidates(self, df):
+        condition = df['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
+        labels_indices = df.index[condition].to_numpy()
+        return labels_indices
 
     def load_single_stock(self, p: Path | str):
         def longterm_trend(x: pd.Series, k:int):
@@ -195,13 +193,14 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
         return tasks
 
-    def generate_task_per_window_size_and_single_stock(self, symnbol: str, window_size: int):
-        df_stock = self.data[symnbol]
+    def generate_task_per_window_size_and_single_stock(self, symbol: str, window_size: int):
+        df_stock = self.data[symbol]
         # condition: only continious rise or fall
-        condition = df_stock['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
-        labels_indices = df_stock.index[condition].to_numpy()
+        # condition = df_stock['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
+        # labels_indices = df_stock.index[condition].to_numpy()
         # code for jumpped tags like [1(support), 0, 0, 1(query)]
         # labels_indices = df_stock.index[df_stock['label'].isin([self.labels_dict['fall'], self.labels_dict['rise']])].to_numpy()
+        labels_indices = self.candidates[symbol]
         labels_candidates = labels_indices[labels_indices >= window_size]
         y_s = np.array(sorted(np.random.choice(labels_candidates, size=(self.n_sample,), replace=False)))
         y_ss = y_s-window_size

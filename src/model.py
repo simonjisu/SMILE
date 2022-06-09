@@ -32,20 +32,6 @@ class LSTMAttention(nn.Module):
         else:
             return normed_context, None
 
-class MappingNet(nn.Module):
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.rn = nn.Sequential(
-            nn.Linear(hidden_size, 2*hidden_size, bias=False),
-            nn.ReLU(),# nn.LeakyReLU(),
-            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
-        )
-
-    def forward(self, x: torch.tensor):
-        # x: (B, H)
-        outputs = self.rn(x)
-        return outputs
-
 class MetaModel(nn.Module):
     def __init__(
             self, 
@@ -73,10 +59,10 @@ class MetaModel(nn.Module):
         self.lstm = LSTMAttention(hidden_size, hidden_size, num_layers)  # encode
         self.mapping_net = MappingNet(hidden_size)  # to generate z(latent)
         self.decoder = nn.Linear(hidden_size, 2*self.parameter_size, bias=False)
-        self.prob_layer = nn.LogSoftmax(dim=1) if output_size >=2 else nn.LogSigmoid()
+        # self.prob_layer = nn.LogSoftmax(dim=1) if output_size >=2 else nn.Sigmoid()
 
         # Loss
-        self.loss_fn = nn.NLLLoss()
+        self.loss_fn = nn.CrossEntropyLoss() if output_size >=2 else nn.BCEWithLogitsLoss()
 
     def encode(self, inputs, rt_attn: bool=False):
         # inputs: (B, T, I)
@@ -89,8 +75,6 @@ class MetaModel(nn.Module):
         # inputs: (B, T, I)
         # encoded: (B, H)
         encoded, attn = self.encode(inputs, rt_attn=rt_attn)
-        # Relation Network?
-        # each class is different
         hs = self.mapping_net(encoded)
 
         z, dist = self.sample(hs, size=self.hidden_size)
@@ -99,9 +83,9 @@ class MetaModel(nn.Module):
     def sample(self, distribution_params, size):
         mean, log_std = distribution_params[:, :size], distribution_params[:, size:]
         std = torch.exp(log_std)
-        dist = torch.distributions.Normal(torch.zeros_like(mean), torch.ones_like(std))
+        dist = torch.distributions.Normal(mean, std)
         z = dist.rsample()
-        return mean + std*z, dist
+        return z, dist
 
     def decode(self, z):
         # z: (B, H)
@@ -113,14 +97,14 @@ class MetaModel(nn.Module):
     def predict(self, encoded, parameters):
         theta = parameters.view(-1, self.hidden_size, self.output_size)
         scores = encoded.unsqueeze(1).bmm(theta).squeeze()
-        probs = self.prob_layer(scores)
-        return probs
+        # probs = self.prob_layer(scores)
+        return scores
         
-    def cal_accuracy(self, log_probs, target):
+    def cal_accuracy(self, scores, target):
         if self.output_size >= 2:
-            pred = log_probs.argmax(1)
+            pred = scores.argmax(1)
         else:
-            pred = (torch.exp(log_probs) >= 0.5).long()
+            pred = (torch.sigmoid(scores) >= 0.5).long()
         correct = pred.eq(target).sum()
         acc = correct / len(target)
         return acc
@@ -128,58 +112,62 @@ class MetaModel(nn.Module):
     def reset_records(self):
         self.records = {}
 
-    def inner_loop(self, data, n_inner_step: int=5, rt_attn: bool=False):
+    def inner_loop(self, data, n_inner_step: int=5, n_finetuning_step: int=5, rt_attn: bool=False):
         support_X, support_y = data['support'], data['support_labels']
+        support_y = support_y.float() if self.output_size == 1 else support_y
         support_encoded, support_z, support_dist, support_attn = self.get_z(support_X, rt_attn=rt_attn)
         kld_loss = self.cal_kl_div(support_dist, support_z)
-        
-        z_init = support_z.clone().detach()
+
+        # z_init = z' , parameters = \theta^'_i
+        z_prime = support_z  
 
         # inner adaptation to z
         for i in range(n_inner_step):
-            support_z.retain_grad()
-            parameters = self.decode(support_z)
-            support_log_probs = self.predict(support_encoded, parameters)
-            train_loss = self.loss_fn(support_log_probs, support_y)
+            z_prime.retain_grad()
+            parameters = self.decode(z_prime)
+            scores = self.predict(support_encoded, parameters)
+            train_loss = self.loss_fn(scores, support_y)
             train_loss.backward(retain_graph=True)
+            z_prime = z_prime - self.inner_lr * z_prime.grad.data.detach()
 
-            support_z = support_z - self.inner_lr * support_z.grad.data
+        z_penalty = torch.mean((z_prime.detach() - support_z)**2)
 
-        z_penalty = torch.mean((z_init - support_z)**2)
-        return support_encoded, support_z, kld_loss, z_penalty, support_attn
-
-    def outer_loop(self, data, support_z, support_encoded, n_finetuning_step: int=5, rt_attn: bool=False):
-        # finetuning inner + validation
-        # support_z: (B, H)
-        # inner loop prediction
-        support_y, query_X, query_y = data['support_labels'], data['query'], data['query_labels']
-        parameters = self.decode(support_z)  # parameters: (B, H)
+        parameters = self.decode(z_prime)  # parameters: (B, H)
         parameters.retain_grad()
-        support_log_probs = self.predict(support_encoded, parameters)
-        train_loss = self.loss_fn(support_log_probs, support_y)
-        train_acc = self.cal_accuracy(support_log_probs, support_y)
+        scores = self.predict(support_encoded, parameters)
+        train_loss = self.loss_fn(scores, support_y)
+        train_acc = self.cal_accuracy(scores, support_y)
 
-        # logging
         self.records['Support Loss'] = train_loss.item()
         self.records['Support Accuracy'] = train_acc.item()
         self.records['Inner LR'] = float(self.inner_lr)
         self.records['Finetuning LR'] = float(self.finetuning_lr)
-        self.records['Latents'] = support_z.clone().detach().cpu().numpy()
+        self.records['Latents'] = z_prime.detach().cpu().numpy()
 
         # finetuning adaptation to parameters
-        for i in range(n_finetuning_step):
-            train_loss.backward(retain_graph=True)
-            parameters = parameters - self.finetuning_lr * parameters.grad
-            parameters.retain_grad()
-            support_log_probs = self.predict(support_encoded, parameters)
-            train_loss = self.loss_fn(support_log_probs, support_y)
+        if n_finetuning_step > 0:
+            for i in range(n_finetuning_step):
+                train_loss.backward(retain_graph=True)
+                parameters = parameters - self.finetuning_lr * parameters.grad
+                parameters.retain_grad()
+                scores = self.predict(support_encoded, parameters)
+                train_loss = self.loss_fn(scores, support_y)
+            finetune_train_acc = self.cal_accuracy(scores, support_y)
+            self.records['Finetune Loss'] = train_loss.item()
+            self.records['Finetune Accuracy'] = finetune_train_acc.item()
 
+        return parameters, kld_loss, z_penalty, support_attn
+
+    def outer_loop(self, data, parameters, rt_attn: bool=False):
+        query_X, query_y = data['query'], data['query_labels']
+        query_y = query_y.float() if self.output_size == 1 else query_y
+        
         # meta validation
-        self.manual_model_eval(False)
+        self.manual_model_eval()
         query_encoded, *_, query_attn = self.encode(query_X, rt_attn=rt_attn)
-        query_log_probs = self.predict(query_encoded, parameters)
-        query_loss = self.loss_fn(query_log_probs, query_y)
-        query_acc = self.cal_accuracy(query_log_probs, query_y)
+        query_scores = self.predict(query_encoded, parameters)
+        query_loss = self.loss_fn(query_scores, query_y)
+        query_acc = self.cal_accuracy(query_scores, query_y)
         self.train()
         return query_loss, query_acc, query_attn
 
@@ -216,8 +204,8 @@ class MetaModel(nn.Module):
             rt_attn: bool=False
         ):
         self.reset_records()
-        support_encoded, support_z, kld_loss, z_penalty, support_attn = self.inner_loop(data, n_inner_step, rt_attn)
-        query_loss, query_acc, query_attn = self.outer_loop(data, support_z, support_encoded, n_finetuning_step, rt_attn)
+        parameters, kld_loss, z_penalty, support_attn = self.inner_loop(data, n_inner_step, n_finetuning_step, rt_attn)
+        query_loss, query_acc, query_attn = self.outer_loop(data, parameters, rt_attn)
         return query_loss, query_acc, kld_loss, z_penalty, support_attn, query_attn
 
     def meta_run(self, data, 
@@ -233,7 +221,8 @@ class MetaModel(nn.Module):
         )
         total_loss = self.cal_total_loss(query_loss, kld_loss, z_penalty, beta, gamma, lambda2)
         # logging
-        self.records['Query Loss'] = total_loss.item()
+        self.records['Query Loss'] = query_loss.item()
+        self.records['Total Loss'] = total_loss.item()
         self.records['Query Accuracy'] = query_acc.item()
         if query_attn is not None:
             self.records['Query Attn'] = query_attn.detach().cpu().numpy()
@@ -247,6 +236,6 @@ class MetaModel(nn.Module):
         # cannot use model.eval()
         # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
         for module in self.children():
-            # model.training = mode
+            model.training = mode
             if isinstance(module, nn.Dropout): # or isinstance(module, nn.LayerNorm):
                 module.train(mode)
