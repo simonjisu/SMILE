@@ -58,7 +58,7 @@ def main(args):
         if args.exp_num == 0:
             exp_nums = sorted(map(lambda x: int(x.name.split('_')[-1]), trainer.log_dir.glob(f'{trainer.exp_name}_*')))
             record_file = open('./all_results.csv', 'w', encoding='utf-8')
-            print('| Experiment | Test Type | Test Accuracy | Test Loss | Train Accuracy | Train Loss |', file=record_file) 
+            print('Experiment, Test Type, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file) 
         else:
             exp_nums = [args.exp_num]
 
@@ -80,7 +80,7 @@ def main(args):
                 print(f'[Meta {meta_test.meta_type.capitalize()}] Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}')
                 if args.exp_num == 0:
                     print(
-                        f'| {experiment_name} | {meta_test.meta_type} | {test_acc:.4f} | {test_loss:.4f} | {train_acc:.4f} | {train_loss:.4f} |', 
+                        f'{experiment_name}, {meta_test.meta_type},  {test_acc:.4f}, {test_loss:.4f}, {train_acc:.4f}, {train_loss:.4f}', 
                         file=record_file
                     )
         
