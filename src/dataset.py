@@ -89,6 +89,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         }
         ds_config = ds_info[dtype]
 
+        self.meta_type = meta_type
         self.window_sizes = [5, 10, 15, 20]
         self.n_sample = n_sample
         self.n_lag = n_lag
@@ -98,8 +99,8 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.data = {}
         self.candidates = {}
         ps = list((self.data_dir / ds_config['path']).glob('*.csv'))
-        iterator = ps[:n_train_stock] if meta_type == 'train' else ps[n_train_stock:]
-        for p in tqdm(iterator, total=len(iterator), desc='Processing data and candidates'):    
+        iterator = ps[:n_train_stock] if (meta_type == 'train') or (meta_type == 'test1') else ps[n_train_stock:]
+        for p in tqdm(iterator, total=len(iterator), desc=f'Processing data and candidates for {self.meta_type}'):    
             stock_symbol = p.name.rstrip('.csv')
             df_single = self.load_single_stock(p)
             if meta_type == 'train':
@@ -110,11 +111,11 @@ class MetaStockDataset(torch.utils.data.Dataset):
                     df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
                     labels_indices = self.get_candidates(df_single)
                 elif meta_type == 'test2':
-                        df_single = df_single.loc[df_single['date'] <= ds_config['val_date']].reset_index(drop=True)
-                        labels_indices = self.get_candidates(df_single)
+                    df_single = df_single.loc[df_single['date'] <= ds_config['val_date']].reset_index(drop=True)
+                    labels_indices = self.get_candidates(df_single)
                 elif meta_type == 'test3':
-                        df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
-                        labels_indices = self.get_candidates(df_single)
+                    df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
+                    labels_indices = self.get_candidates(df_single)
                 else:
                     raise KeyError('Error argument `meta_type`, should be in (train, test1, test2, test3)')
 

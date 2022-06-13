@@ -7,21 +7,21 @@ from torch.utils.tensorboard import SummaryWriter
 class Trainer():
     def __init__(
             self, 
-            exp_name, 
-            log_dir, 
-            total_steps,
-            n_inner_step, 
-            n_finetuning_step, 
-            n_valid_step,
-            every_valid_step,
-            beta,
-            gamma,
-            lambda1,
-            lambda2,
-            outer_lr,
-            clip_value,
+            exp_name: str, 
+            log_dir: str, 
+            total_steps: int,
+            n_inner_step: int, 
+            n_finetuning_step: int, 
+            n_valid_step: int,
+            every_valid_step: int,
+            beta: float,
+            gamma: float,
+            lambda1: float,
+            lambda2: float,
+            outer_lr: float,
+            clip_value: float,
             device: str='cpu',
-            print_step: int=5
+            print_step: int=5,
         ):
         self.device = device
         self.print_step = print_step
@@ -38,17 +38,9 @@ class Trainer():
         self.outer_lr = outer_lr
         self.clip_value = clip_value
         
-        # check if exp exists
         self.exp_name = exp_name
         self.log_dir = Path(log_dir).resolve()
-        exp_dirs = sorted(list(self.log_dir.glob(f'{self.exp_name}_*')))
-        exp_num = int(exp_dirs[-1].name[len(self.exp_name)+1:]) if exp_dirs else 0
-        self.exp_dir = self.log_dir / f'{self.exp_name}_{exp_num+1}'
-        self.writer = SummaryWriter(str(self.exp_dir))
-        self.ckpt_path = self.exp_dir / 'checkpoints'
-        if not self.ckpt_path.exists():
-            self.ckpt_path.mkdir()
-        
+
         # aggregate method by window sizes
         self.log_keys = {
             'Support Loss': np.sum, 
@@ -65,6 +57,20 @@ class Trainer():
             'Orthogonality Penalty': np.sum
         }
         
+    def init_experiments(self, exp_num=None):
+        # check if exp exists
+        exp_dirs = sorted(list(self.log_dir.glob(f'{self.exp_name}_*')))
+        if exp_num is None:
+            exp_num = int(exp_dirs[-1].name[len(self.exp_name)+1:]) if exp_dirs else 0
+            self.exp_num = exp_num + 1
+        else:
+            self.exp_num = exp_num
+        self.exp_dir = self.log_dir / f'{self.exp_name}_{self.exp_num}'
+        self.writer = SummaryWriter(str(self.exp_dir))
+        self.ckpt_path = self.exp_dir / 'checkpoints'
+        if not self.ckpt_path.exists():
+            self.ckpt_path.mkdir()
+
     def map_to_tensor(self, tasks, device: None | str=None):
         if device is None:
             device = torch.device('cpu')
@@ -91,17 +97,62 @@ class Trainer():
         )
         return total_loss, records
 
-    def manual_model_eval(self, model, mode=False):
-        # [PyTorch Issue] RuntimeError: cudnn RNN backward can only be called in training mode
-        # cannot use model.eval()
-        # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
-        for module in model.children():
-            # model.training = mode
-            if isinstance(module, nn.Dropout) or isinstance(module, nn.LayerNorm):
-                module.train(mode)
-        return model
+    def _train(self, model, meta_dataset, optim, optim_lr, step):
+        # Meta Train
+        model.meta_train()
+        optim.zero_grad()
+        optim_lr.zero_grad()
+        train_tasks = meta_dataset.generate_tasks()
+        train_records = {k: [] for k in self.log_keys.keys()}
+        
+        # Outer Loop
+        all_total_loss = 0.
+        for window_size, tasks in train_tasks.items(): # window size x (n_sample * n_stock)
+            batch_data = self.map_to_tensor(tasks, device=self.device)
+            total_loss, records = self.step_batch(model, batch_data)
+            # version - 2
+            all_total_loss += total_loss
+            for key, v in records.items():
+                if (key in ['Z', 'Z Prime']):
+                    self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
+                else:
+                    train_records[key].append(v)
+                    self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
 
-    def meta_train(self, model, meta_trainset):
+        all_total_loss.backward()
+        nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
+        nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
+        optim.step()
+        optim_lr.step()
+
+        return train_records
+
+    def _valid(self, model, meta_dataset, n_valid: int):
+        # turn-off dropout and sample by mean
+        model.manual_model_eval()
+        valid_records = {'Accuracy': [], 'Loss': []}  # n_valid x window_size 
+        for val_step in range(n_valid):
+            valid_step_loss = []
+            valid_step_acc = []
+            valid_tasks = meta_dataset.generate_tasks()
+
+            for window_size, tasks in valid_tasks.items():
+                batch_data = self.map_to_tensor(tasks, device=self.device)
+                _, records = self.step_batch(model, batch_data)
+                valid_step_loss.append(records['Query Loss'])
+                valid_step_acc.append(records['Query Accuracy'])
+
+            valid_records['Accuracy'].append(valid_step_acc)
+            valid_records['Loss'].append(valid_step_loss)
+        
+        # aggregate window loss and accruacy: mean by n_valid
+        valid_records['Accuracy'] = np.mean(valid_records['Accuracy'], axis=0)
+        valid_records['Loss'] = np.mean(valid_records['Loss'], axis=0)
+
+        return valid_records
+
+    def meta_train(self, model, meta_dataset):
+        self.init_experiments(exp_num=None)
         model = model.to(self.device)
         lr_list = ['inner_lr', 'finetuning_lr']
         params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]
@@ -112,32 +163,8 @@ class Trainer():
 
         for step in range(self.total_steps):
             # Meta Train
-            model.meta_train()
-            optim.zero_grad()
-            optim_lr.zero_grad()
-            train_tasks = meta_trainset.generate_tasks()
-            train_records = {k: [] for k in self.log_keys.keys()}
+            train_records = self._train(model, meta_dataset=meta_dataset, optim=optim, optim_lr=optim_lr, step=step)
             
-            # Outer Loop
-            all_total_loss = 0.
-            for window_size, tasks in train_tasks.items(): # window size x (n_sample * n_stock)
-                batch_data = self.map_to_tensor(tasks, device=self.device)
-                total_loss, records = self.step_batch(model, batch_data)
-                # version - 2
-                all_total_loss += total_loss
-                for key, v in records.items():
-                    if (key in ['Z', 'Z Prime']):
-                        self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
-                    else:
-                        train_records[key].append(v)
-                        self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
-
-            all_total_loss.backward()
-            nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
-            nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
-            optim.step()
-            optim_lr.step()
-
             # logging summary(aggregate score for all window size tasks)
             for key, agg_func in self.log_keys.items():
                 self.writer.add_scalar(f'Train-{key}', agg_func(train_records[key]), step)
@@ -152,30 +179,11 @@ class Trainer():
                 
             # Meta Valid
             if (step % self.every_valid_step == 1) or (step == self.total_steps-1):
-                # turn-off dropout and sample by mean
-                # model.meta_valid()
-                model.manual_model_eval()
-                valid_records = {'Accuracy': [], 'Loss': []}  # n_valid_step x window_size 
-                for val_step in range(self.n_valid_step):
-                    valid_step_loss = []
-                    valid_step_acc = []
-                    valid_tasks = meta_trainset.generate_tasks()
-
-                    for window_size, tasks in valid_tasks.items():
-                        batch_data = self.map_to_tensor(tasks, device=self.device)
-                        _, records = self.step_batch(model, batch_data)
-                        valid_step_loss.append(records['Query Loss'])
-                        valid_step_acc.append(records['Query Accuracy'])
-
-                    valid_records['Accuracy'].append(valid_step_acc)
-                    valid_records['Loss'].append(valid_step_loss)
+                valid_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step)
                 
-                # aggregate window loss and accruacy: mean by n_valid_step
-                valid_records['Accuracy'] = np.mean(valid_records['Accuracy'], axis=0)
-                valid_records['Loss'] = np.mean(valid_records['Loss'], axis=0)
-
+                # record
                 for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
-                    for i, window_size in enumerate(meta_trainset.window_sizes):
+                    for i, window_size in enumerate(meta_dataset.window_sizes):
                         self.writer.add_scalar(f'Valid-WinSize={window_size}-{key}', valid_records[key][i], step)
                     self.writer.add_scalar(f'Valid-Task {key}', agg_func(valid_records[key]), step)
 
@@ -184,12 +192,33 @@ class Trainer():
                     s1 = '  ' if i == 0 else ''
                     s2 = ' | ' if i == 0 else '\n'
                     print(f'{s1}{key}: {agg_func(valid_records[key]):.4f}', end=s2)
-                    
+
+                # model save        
                 cur_eval_loss = np.mean(valid_records['Loss'])
                 cur_eval_acc = np.mean(valid_records['Accuracy'])
                 if cur_eval_acc > best_eval_acc:
                     best_eval_acc = cur_eval_acc 
                     torch.save(model.state_dict(), str(self.ckpt_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
-    def meta_test(self, meta_test1, meta_test2, meta_test3):
-        pass
+    def meta_test(self, model, meta_dataset, exp_num: int, n_test: int=100):
+        test_type = int(meta_dataset.meta_type[-1])
+        self.init_experiments(exp_num=exp_num)
+        model = model.to(self.device)
+        # load model
+        best_ckpt = sorted((self.ckpt_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
+        state_dict = torch.load(best_ckpt)
+        model.load_state_dict(state_dict=state_dict)
+        test_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=n_test)
+                
+        # record
+        for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
+            for i, window_size in enumerate(meta_dataset.window_sizes):
+                self.writer.add_scalar(f'Test{test_type}-WinSize={window_size}-{key}', test_records[key][i], 0)
+            self.writer.add_scalar(f'Test{test_type}-Task {key}', agg_func(test_records[key]), 0)
+
+        test_acc = np.mean(test_records['Accuracy'])
+        test_loss = np.sum(test_records['Loss'])
+        print(f'[Meta Test{test_type}]\n  Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}')
+        return test_acc, test_loss
+
+        
