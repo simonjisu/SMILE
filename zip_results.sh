@@ -1,0 +1,1 @@
+zip -r results.zip ./logging/* -x ./logging/*/events.out.tfevents.*
