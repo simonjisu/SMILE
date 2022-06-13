@@ -1,0 +1,7 @@
+| Experiment | Test Type | Test Accuracy | Test Loss | Train Accuracy | Train Loss |
+| kdd_1 | test1 | 0.5123 | 3.2192 | 0.6600 | 0.6101 |
+| kdd_1 | test2 | 0.6182 | 2.6850 | 0.6600 | 0.6101 |
+| kdd_1 | test3 | 0.5260 | 3.1641 | 0.6600 | 0.6101 |
+| kdd_2 | test1 | 0.5060 | 3.2161 | 0.6533 | 0.6586 |
+| kdd_2 | test2 | 0.5970 | 2.7288 | 0.6533 | 0.6586 |
+| kdd_2 | test3 | 0.4990 | 3.3416 | 0.6533 | 0.6586 |

@@ -200,25 +200,24 @@ class Trainer():
                     best_eval_acc = cur_eval_acc 
                     torch.save(model.state_dict(), str(self.ckpt_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
-    def meta_test(self, model, meta_dataset, exp_num: int, n_test: int=100):
-        test_type = int(meta_dataset.meta_type[-1])
+    def get_best_results(self, exp_num):
         self.init_experiments(exp_num=exp_num)
-        model = model.to(self.device)
-        # load model
         best_ckpt = sorted((self.ckpt_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
+        best_step, train_acc, train_loss = best_ckpt.name.rstrip('.ckpt').split('-')
         state_dict = torch.load(best_ckpt)
-        model.load_state_dict(state_dict=state_dict)
-        test_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=n_test)
-                
-        # record
-        for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
-            for i, window_size in enumerate(meta_dataset.window_sizes):
-                self.writer.add_scalar(f'Test{test_type}-WinSize={window_size}-{key}', test_records[key][i], 0)
-            self.writer.add_scalar(f'Test{test_type}-Task {key}', agg_func(test_records[key]), 0)
+        return int(best_step), float(train_acc), float(train_loss), state_dict
 
+    def meta_test(self, model, meta_dataset, n_test: int=100, record_tensorboard: bool=False):
+        # load model
+        model = model.to(self.device)
+        # test
+        test_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=n_test)
+        if record_tensorboard:
+            for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
+                for i, window_size in enumerate(meta_dataset.window_sizes):
+                    self.writer.add_scalar(f'Test-WinSize={window_size}-{key}', test_records[key][i], 0)
+                self.writer.add_scalar(f'Test-Task {key}', agg_func(test_records[key]), 0)
         test_acc = np.mean(test_records['Accuracy'])
         test_loss = np.sum(test_records['Loss'])
-        print(f'[Meta Test{test_type}]\n  Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}')
         return test_acc, test_loss
-
         
