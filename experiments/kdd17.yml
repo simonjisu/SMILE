@@ -2,7 +2,7 @@
 data_dir: "./data"
 dtype: "kdd17"
 n_train_stock: 40  # number of training stocks to construct the universe
-n_sample: 10  # number of samples per window size and per single stock
+n_sample: 5  # number of samples per window size and per single stock
 n_lag: 1
 n_stock: 3  # number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
 keep_support_history: true  # query data will starting from support starting date
