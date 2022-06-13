@@ -24,7 +24,7 @@ def main(args):
         trainer_kwargs = meta_args.get_args(cls=Trainer)
         trainer = Trainer(**trainer_kwargs)
         trainer.meta_train(model, meta_trainset=meta_trainset)
-        meta_args.save(trainer.exp_dir / 'settings.yml', meta_args)
+        meta_args.save(trainer.exp_dir / 'settings.yml', meta_args.kwargs)
         
     else:
         meta_test1 = MetaStockDataset(meta_type='test1', **data_kwargs)
