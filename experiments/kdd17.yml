@@ -22,7 +22,7 @@ exp_name: 'kdd'
 log_dir: './logging'
 total_steps: 100000
 n_inner_step: 5
-n_finetuning_step: 0
+n_finetuning_step: 5
 n_valid_step: 10
 every_valid_step: 500
 beta: 0.001  # KLD Loss
