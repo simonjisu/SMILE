@@ -57,7 +57,7 @@ def main(args):
         # if args.exp_num is zero, means test for all and only record a file in `all_results.csv`
         if args.exp_num == 0:
             exp_nums = sorted(map(lambda x: int(x.name.split('_')[-1]), trainer.log_dir.glob(f'{trainer.exp_name}_*')))
-            record_file = open('./all_results.csv', 'w', encoding='utf-8')
+            record_file = open(f'./{trainer.exp_name}_all_results.csv', 'w', encoding='utf-8')
             print('Experiment, Test Type, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file) 
         else:
             exp_nums = [args.exp_num]
