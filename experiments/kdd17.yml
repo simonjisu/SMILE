@@ -20,7 +20,7 @@ finetuning_lr_init: 0.1
 # Trainer
 exp_name: 'kdd17'
 log_dir: './logging'
-total_steps: 150000
+total_steps: 100000
 n_inner_step: 5
 n_finetuning_step: 0
 n_valid_step: 10
