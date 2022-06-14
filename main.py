@@ -15,7 +15,7 @@ def main(args):
     data_kwargs = meta_args.get_args(cls=MetaStockDataset)
     if not args.meta_test:
         assert args.exp_num == 0, 'Should not give `exp_num` argument when it is training'
-        meta_trainset = MetaStockDataset(meta_type='train', **data_kwargs)
+        meta_train = MetaStockDataset(meta_type='train', **data_kwargs)
         model_kwargs = meta_args.get_args(cls=MetaModel)
         model = MetaModel(**model_kwargs)
 
@@ -23,7 +23,7 @@ def main(args):
         trainer = Trainer(**trainer_kwargs)
 
         # meta train
-        trainer.meta_train(model, meta_trainset=meta_trainset)
+        trainer.meta_train(model, meta_dataset=meta_train)
         meta_args.save(trainer.exp_dir / 'settings.yml', meta_args.kwargs)
 
         # meta test 
