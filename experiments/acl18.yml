@@ -1,6 +1,6 @@
 # Data
 data_dir: "./data"
-dtype: "kdd17"
+dtype: "acl18"
 n_train_stock: 40  # number of training stocks to construct the universe
 n_sample: 5  # number of samples per window size and per single stock
 n_lag: 1
@@ -18,9 +18,9 @@ inner_lr_init: 1
 finetuning_lr_init: 0.1
 
 # Trainer
-exp_name: 'kdd17'
+exp_name: 'acl18'
 log_dir: './logging'
-total_steps: 100000
+total_steps: 150000
 n_inner_step: 5
 n_finetuning_step: 5
 n_valid_step: 10

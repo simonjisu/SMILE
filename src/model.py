@@ -186,8 +186,8 @@ class MetaModel(nn.Module):
         self.records['Support Accuracy'] = train_acc.item()
         self.records['Inner LR'] = float(self.inner_lr)
         self.records['Finetuning LR'] = float(self.finetuning_lr)
-        self.records['Z Prime'] = z_prime.detach().cpu().numpy()
-        self.records['Z'] = support_z.detach().cpu().numpy()
+        # self.records['Z Prime'] = z_prime.detach().cpu().numpy()
+        # self.records['Z'] = support_z.detach().cpu().numpy()
 
         # finetuning adaptation to parameters
         if n_finetuning_step > 0:

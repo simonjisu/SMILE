@@ -113,11 +113,11 @@ class Trainer():
             # version - 2
             all_total_loss += total_loss
             for key, v in records.items():
-                if (key in ['Z', 'Z Prime']):
-                    self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
-                else:
-                    train_records[key].append(v)
-                    self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
+                # if (key in ['Z', 'Z Prime']):
+                #     self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
+                # else:
+                train_records[key].append(v)
+                self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
 
         all_total_loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
@@ -178,7 +178,7 @@ class Trainer():
                 print()
                 
             # Meta Valid
-            if (step % self.every_valid_step == 1) or (step == self.total_steps-1):
+            if (step % self.every_valid_step == 0) or (step == self.total_steps-1):
                 valid_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step)
                 
                 # record
