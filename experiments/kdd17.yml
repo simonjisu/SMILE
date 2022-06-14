@@ -1,6 +1,6 @@
 # Data
 data_dir: './data'
-dtype: 'acl18'
+dtype: 'kdd17'
 n_train_stock: 40  # number of training stocks to construct the universe
 n_sample: 5  # number of samples per window size and per single stock
 n_lag: 1
