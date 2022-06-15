@@ -62,15 +62,6 @@ def main(args):
             model_kwargs = meta_args.get_args(cls=MetaModel)
             trainer_kwargs = meta_args.get_args(cls=Trainer)
             trainer = Trainer(**trainer_kwargs)
-            # trainer will find the experiment results by the combination of 
-            # `exp_name` in setting file and `exp_num` in argument
-            # if args.exp_num is zero, means test for all and only record a file in `all_results.csv`
-            # if args.exp_num == 0:
-            #     exp_nums = sorted(map(lambda x: int(x.name.split('_')[-1]), trainer.log_dir.glob(f'{trainer.exp_name}_*')))
-            #     record_file = open(f'./{trainer.exp_name}_all_results.csv', 'w', encoding='utf-8')
-            #     print('Experiment, Test Type, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file) 
-            # else:
-            #     exp_nums = [args.exp_num]
             
             exp_num = sorted(map(lambda x: int(x.name.split('_')[-1]), trainer.log_dir.glob(f'{trainer.exp_name}_*')))[-1]
             experiment_name = f'{trainer.exp_name}_{exp_num}'
