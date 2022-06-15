@@ -28,7 +28,8 @@ def main(args):
 
         # meta test 
         print('=='*10)
-        best_step, train_acc, train_loss, state_dict = trainer.get_best_results(exp_num=trainer.exp_num)
+        best_step, train_acc, train_loss, state_dict = trainer.get_best_results(
+            exp_num=trainer.exp_num, record_tensorboard=True)
         model = MetaModel(**model_kwargs)
         model.load_state_dict(state_dict=state_dict)
         print(f'[Meta Train Query Result] Best Step: {best_step} | Accuracy: {train_acc:.4f} | Loss: {train_loss:.4f}')
@@ -65,7 +66,8 @@ def main(args):
         for exp_num in exp_nums:
             experiment_name = f'{trainer.exp_name}_{exp_num}'
             print(f'===== {experiment_name} =====')
-            best_step, train_acc, train_loss, state_dict = trainer.get_best_results(exp_num)  # get best results and state dict
+            best_step, train_acc, train_loss, state_dict = trainer.get_best_results(
+                exp_num=exp_num, record_tensorboard=False)  # get best results and state dict
             model = MetaModel(**model_kwargs)
             model.load_state_dict(state_dict=state_dict)
             print(f'[Meta Train Query Result] Best Step: {best_step} | Accuracy: {train_acc:.4f} | Loss: {train_loss:.4f}')

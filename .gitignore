@@ -4,3 +4,4 @@ __pycache__
 p1_log
 p2_log
 logging
+*.log

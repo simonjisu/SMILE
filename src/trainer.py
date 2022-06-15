@@ -57,7 +57,7 @@ class Trainer():
             'Orthogonality Penalty': np.sum
         }
         
-    def init_experiments(self, exp_num=None):
+    def init_experiments(self, exp_num=None, record_tensorboard: bool=True):
         # check if exp exists
         exp_dirs = sorted(list(self.log_dir.glob(f'{self.exp_name}_*')))
         if exp_num is None:
@@ -66,7 +66,8 @@ class Trainer():
         else:
             self.exp_num = exp_num
         self.exp_dir = self.log_dir / f'{self.exp_name}_{self.exp_num}'
-        self.writer = SummaryWriter(str(self.exp_dir))
+        if record_tensorboard:
+            self.writer = SummaryWriter(str(self.exp_dir))
         self.ckpt_path = self.exp_dir / 'checkpoints'
         if not self.ckpt_path.exists():
             self.ckpt_path.mkdir()
@@ -152,7 +153,7 @@ class Trainer():
         return valid_records
 
     def meta_train(self, model, meta_dataset):
-        self.init_experiments(exp_num=None)
+        self.init_experiments(exp_num=None, record_tensorboard=True)
         model = model.to(self.device)
         lr_list = ['inner_lr', 'finetuning_lr']
         params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]
@@ -201,8 +202,8 @@ class Trainer():
                     best_eval_acc = cur_eval_acc 
                     torch.save(model.state_dict(), str(self.ckpt_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
-    def get_best_results(self, exp_num):
-        self.init_experiments(exp_num=exp_num)
+    def get_best_results(self, exp_num, record_tensorboard: bool=True):
+        self.init_experiments(exp_num=exp_num, record_tensorboard=record_tensorboard)
         best_ckpt = sorted((self.ckpt_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
         best_step, train_acc, train_loss = best_ckpt.name.rstrip('.ckpt').split('-')
         state_dict = torch.load(best_ckpt)
@@ -216,8 +217,8 @@ class Trainer():
         if record_tensorboard:
             for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
                 for i, window_size in enumerate(meta_dataset.window_sizes):
-                    self.writer.add_scalar(f'Test-WinSize={window_size}-{key}', test_records[key][i], 0)
-                self.writer.add_scalar(f'Test-Task {key}', agg_func(test_records[key]), 0)
+                    self.writer.add_scalar(f'{meta_dataset.meta_type.capitalize()}-WinSize={window_size}-{key}', test_records[key][i], 0)
+                self.writer.add_scalar(f'{meta_dataset.meta_type.capitalize()}-Task {key}', agg_func(test_records[key]), 0)
         test_acc = np.mean(test_records['Accuracy'])
         test_loss = np.sum(test_records['Loss'])
         return test_acc, test_loss
