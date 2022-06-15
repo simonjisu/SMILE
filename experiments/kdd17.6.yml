@@ -2,7 +2,7 @@
 data_dir: './data'
 dtype: 'kdd17'
 n_train_stock: 40  # number of training stocks to construct the universe
-n_sample: 5  # number of samples per window size and per single stock
+n_sample: 10  # number of samples per window size and per single stock
 n_lag: 1
 n_stock: 3  # number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
 keep_support_history: true  # query data will starting from support starting date
@@ -18,7 +18,7 @@ inner_lr_init: 1
 finetuning_lr_init: 0.1
 
 # Trainer
-exp_name: 'kdd17'
+exp_name: 'kdd17-n_stock3.n_sample10'
 log_dir: './logging'
 total_steps: 100000
 n_inner_step: 5
