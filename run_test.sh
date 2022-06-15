@@ -1,1 +1,1 @@
-python main.py --exp $1 --meta_test --exp_num $2 --n_test $3
+python main.py --meta_test --n_test $3
