@@ -153,7 +153,6 @@ class Trainer():
         return valid_records
 
     def meta_train(self, model, meta_dataset):
-        self.init_experiments(exp_num=None, record_tensorboard=True)
         model = model.to(self.device)
         lr_list = ['inner_lr', 'finetuning_lr']
         params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]

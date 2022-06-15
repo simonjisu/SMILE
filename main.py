@@ -23,8 +23,9 @@ def main(args):
         trainer = Trainer(**trainer_kwargs)
 
         # meta train
+        trainer.init_experiments(exp_num=None, record_tensorboard=True)
         trainer.meta_train(model, meta_dataset=meta_train)
-        meta_args.save(trainer.exp_dir / 'settings.yml', meta_args.kwargs)
+        meta_args.save(trainer.exp_dir / 'settings.yml')
 
         # meta test 
         print('=='*10)
