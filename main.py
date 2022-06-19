@@ -51,6 +51,7 @@ def main(args):
         print('Experiment, Test Type, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file) 
         all_exps = [p for p in Path('./logging').glob('*') if p.is_dir()]
         for exp in all_exps:
+            print(f'Processing: {exp.name}')
             setting_file = exp / 'settings.yml'
         
             meta_args = ARGProcessor(setting_file=setting_file)
