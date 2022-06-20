@@ -49,8 +49,8 @@ def main(args):
     else:
         record_file = open(f'./all_results.csv', 'w', encoding='utf-8')
         record_file_win = open(f'./all_results_win.csv', 'w', encoding='utf-8')
-        print('Experiment, Test Type, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file) 
-        print('Experiment, Test Type, Window Size, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file_win) 
+        print('Experiment,Test Type,Test Accuracy,Test Loss,Train Accuracy,Train Loss', file=record_file) 
+        print('Experiment,Test Type,Window Size,Test Accuracy,Test Loss,Train Accuracy,Train Loss', file=record_file_win) 
         
         all_exps = [p for p in Path('./logging').glob('*') if p.is_dir()]
         for exp in all_exps:
@@ -87,14 +87,14 @@ def main(args):
                 test_loss = test_results['Task']['Loss']
                 print(f'[Meta {meta_test.meta_type.capitalize()}] Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}')
                 print(
-                    f'{experiment_name}, {meta_test.meta_type}, {test_acc:.4f}, {test_loss:.4f}, {train_acc:.4f}, {train_loss:.4f}', 
+                    f'{experiment_name},{meta_test.meta_type},{test_acc:.4f},{test_loss:.4f},{train_acc:.4f},{train_loss:.4f}', 
                     file=record_file
                 )
                 for win_size in meta_test.window_sizes:
-                    test_acc = test_results['Task']['Accuracy'][win_size]
-                    test_loss = test_results['Task']['Loss'][win_size]
+                    test_acc = test_results['Win']['Accuracy'][win_size]
+                    test_loss = test_results['Win']['Loss'][win_size]
                     print(
-                        f'{experiment_name}, {meta_test.meta_type}, {win_size}, {test_acc:.4f}, {test_loss:.4f}, {train_acc:.4f}, {train_loss:.4f}', 
+                        f'{experiment_name},{meta_test.meta_type},{win_size},{test_acc:.4f},{test_loss:.4f},{train_acc:.4f},{train_loss:.4f}', 
                         file=record_file_win
                     )
         
