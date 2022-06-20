@@ -1,6 +1,6 @@
-# Stock Movement prediction wIth Latent Embedding optimization
+# Stock Movement predIction with Latent Embedding optimization
 
-😊 SMILE - Stock Movement prediction wIth Latent Embedding optimization
+😊 SMILE - Stock Movement predIction with Latent Embedding optimization
 
 ```
 pip install -r requirements.txt
