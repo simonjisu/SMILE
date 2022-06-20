@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from collections import defaultdict
 from pathlib import Path 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -213,12 +214,21 @@ class Trainer():
         model = model.to(self.device)
         # test
         test_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=n_test)
-        if record_tensorboard:
-            for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
-                for i, window_size in enumerate(meta_dataset.window_sizes):
-                    self.writer.add_scalar(f'{meta_dataset.meta_type.capitalize()}-WinSize={window_size}-{key}', test_records[key][i], 0)
-                self.writer.add_scalar(f'{meta_dataset.meta_type.capitalize()}-Task {key}', agg_func(test_records[key]), 0)
-        test_acc = np.mean(test_records['Accuracy'])
-        test_loss = np.sum(test_records['Loss'])
-        return test_acc, test_loss
+
+        results = defaultdict(dict)
+        results['Win']['Accuracy'] = {}
+        results['Win']['Loss'] = {}
+
+        for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
+            for i, window_size in enumerate(meta_dataset.window_sizes):
+                k = f'{meta_dataset.meta_type.capitalize()}-WinSize={window_size}-{key}'
+                if record_tensorboard:
+                    self.writer.add_scalar(k, test_records[key][i], window_size)
+                results['Win'][key][window_size] = test_records[key][i]
+            k = f'{meta_dataset.meta_type.capitalize()}-Task-{key}'
+            results[k] = agg_func(test_records[key])
+            if record_tensorboard:
+                self.writer.add_scalar(k, agg_func(test_records[key]), 0)
+            results['Task'][key] = agg_func(test_records[key])
+        return results
         

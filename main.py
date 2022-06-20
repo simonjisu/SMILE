@@ -48,7 +48,10 @@ def main(args):
         
     else:
         record_file = open(f'./all_results.csv', 'w', encoding='utf-8')
+        record_file_win = open(f'./all_results_win.csv', 'w', encoding='utf-8')
         print('Experiment, Test Type, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file) 
+        print('Experiment, Test Type, Window Size, Test Accuracy, Test Loss, Train Accuracy, Train Loss', file=record_file_win) 
+        
         all_exps = [p for p in Path('./logging').glob('*') if p.is_dir()]
         for exp in all_exps:
             print(f'Processing: {exp.name}')
@@ -74,17 +77,26 @@ def main(args):
             print(f'[Meta Train Query Result] Best Step: {best_step} | Accuracy: {train_acc:.4f} | Loss: {train_loss:.4f}')
 
             for meta_test in [meta_test1, meta_test2, meta_test3]:
-                test_acc, test_loss = trainer.meta_test(
+                test_results = trainer.meta_test(
                     model=model, 
                     meta_dataset=meta_test,
                     n_test=args.n_test,
                     record_tensorboard=False
                 )
+                test_acc = test_results['Task']['Accuracy']
+                test_loss = test_results['Task']['Loss']
                 print(f'[Meta {meta_test.meta_type.capitalize()}] Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}')
                 print(
-                    f'{experiment_name}, {meta_test.meta_type},  {test_acc:.4f}, {test_loss:.4f}, {train_acc:.4f}, {train_loss:.4f}', 
+                    f'{experiment_name}, {meta_test.meta_type}, {test_acc:.4f}, {test_loss:.4f}, {train_acc:.4f}, {train_loss:.4f}', 
                     file=record_file
                 )
+                for win_size in meta_test.window_sizes:
+                    test_acc = test_results['Task']['Accuracy'][win_size]
+                    test_loss = test_results['Task']['Loss'][win_size]
+                    print(
+                        f'{experiment_name}, {meta_test.meta_type}, {win_size}, {test_acc:.4f}, {test_loss:.4f}, {train_acc:.4f}, {train_loss:.4f}', 
+                        file=record_file_win
+                    )
         
         record_file.close()
 
