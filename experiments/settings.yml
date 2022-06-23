@@ -1,0 +1,35 @@
+# Dataset(dataset.py)
+data_dir: './data'  # Data folder 
+dtype: 'acl18'  # A vaiable dataset type: 'acl18' or 'kdd17' 
+n_train_stock: 40  # Number of training stocks to construct the universe
+n_sample: 5  # Number of samples per window size and per single stock
+n_lag: 1  # Number of time lags for experiments
+n_stock: 3  # Number of iteration(stock) to sample per window size, total will be `n_stocks` * `n_sample`
+keep_support_history: true  # Query data will starting from support starting date
+show_y_index: false  # For debug purpose
+
+# Model(model.py)
+feature_size: 11  # No need to change this
+hidden_size: 64  # Hidden layer size
+output_size: 1  # 1 binary crossentropy / if larger than 2 will use crossentropy with softmax
+num_layers: 2  # Number of layers in encoder
+drop_rate: 0.0  # Drop rate after linear transferom layer 
+inner_lr_init: 1  # Initial inner-loop learning rate
+finetuning_lr_init: 0.0  # Finetune learinng rate
+
+# Trainer(trainer.py)
+exp_name: 'acl18-baseline'  # Experiment name to save in the `log_dir` folder
+log_dir: './logging'  # Logging directory
+total_steps: 100000  # Total number of steps
+n_inner_step: 10  # Number of inner loop step
+n_finetuning_step: 0  # Number of finetuning step
+n_valid_step: 10  # Number of meta validation step
+every_valid_step: 500  # Evaluation step
+beta: 0.001  # KLD Loss
+gamma: 1.0e-8  # Z penalty
+lambda1: 1.0e-9  # Weight decay
+lambda2: 0.1 # Orthogonality penalty
+outer_lr: 1.0e-4  # Outer loop Learning rate
+clip_value: 0.1  # Gradient clip value
+device: 'cuda'  # Device
+print_step: 250  # Print step

@@ -70,8 +70,11 @@ class Trainer():
         if record_tensorboard:
             self.writer = SummaryWriter(str(self.exp_dir))
         self.ckpt_path = self.exp_dir / 'checkpoints'
+        self.ckpt_step_path = self.ckpt_path / 'step'
         if not self.ckpt_path.exists():
             self.ckpt_path.mkdir()
+        if not self.ckpt_step_path.exists():
+            self.ckpt_step_path.mkdir()
 
     def map_to_tensor(self, tasks, device: None | str=None):
         if device is None:
@@ -195,16 +198,20 @@ class Trainer():
                     s2 = ' | ' if i == 0 else '\n'
                     print(f'{s1}{key}: {agg_func(valid_records[key]):.4f}', end=s2)
 
-                # model save        
+                # model save best        
                 cur_eval_loss = np.mean(valid_records['Loss'])
                 cur_eval_acc = np.mean(valid_records['Accuracy'])
+                # save by every step 
+                torch.save(model.state_dict(), str(self.ckpt_step_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+                # save best
                 if cur_eval_acc > best_eval_acc:
                     best_eval_acc = cur_eval_acc 
-                    torch.save(model.state_dict(), str(self.ckpt_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+                    torch.save(model.state_dict(), str(self.ckpt_path / f'best_model.ckpt'))
 
     def get_best_results(self, exp_num, record_tensorboard: bool=True):
         self.init_experiments(exp_num=exp_num, record_tensorboard=record_tensorboard)
-        best_ckpt = sorted((self.ckpt_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
+        # best_ckpt = sorted((self.ckpt_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
+        best_ckpt = sorted((self.ckpt_step_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
         best_step, train_acc, train_loss = best_ckpt.name.rstrip('.ckpt').split('-')
         state_dict = torch.load(best_ckpt)
         return int(best_step), float(train_acc), float(train_loss), state_dict

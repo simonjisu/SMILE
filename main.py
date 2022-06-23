@@ -38,14 +38,16 @@ def main(args):
         meta_test2 = MetaStockDataset(meta_type='test2', **data_kwargs)
         meta_test3 = MetaStockDataset(meta_type='test3', **data_kwargs)
         for meta_test in [meta_test1, meta_test2, meta_test3]:
-            test_acc, test_loss = trainer.meta_test(
+            test_results = trainer.meta_test(
                 model=model, 
                 meta_dataset=meta_test, 
                 n_test=args.n_test,
                 record_tensorboard=True
             )
+            test_acc = test_results['Task']['Accuracy']
+            test_loss = test_results['Task']['Loss']
             print(f'[Meta {meta_test.meta_type.capitalize()}] Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}')
-        
+            
     else:
         record_file = open(f'./all_results.csv', 'w', encoding='utf-8')
         record_file_win = open(f'./all_results_win.csv', 'w', encoding='utf-8')

@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 
 class LSTM(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, num_layers: int):
