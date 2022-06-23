@@ -58,7 +58,7 @@ $ sh ./run_test.sh 100
 ### Table
 
 | Experiment File | Experiment| Test Type| Test Accuracy| Test Loss| Train Accuracy| Train Loss|
-| --- | --- |  --- |  --- |  --- |  --- |  --- | 
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | 
 | acl18.0 | acl18-baseline| test1| 0.5118| 7.4329| 0.8633| 0.3078| 
 | | | test2| 0.6877| 3.8232| | | 
 | | | test3| 0.5135| 6.6364| | |
