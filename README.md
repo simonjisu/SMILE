@@ -2,6 +2,20 @@
 
 😊 SMILE - Stock Movement predIction with Latent Embedding optimization
 
+## People
+
+* **Yejin Hwang**: @YejinHwang2
+    * 🏫: SNU Graduate School of Data Science
+    * 📧: evergreen97@snu.ac.kr
+* **Jisoo Jang**: @simonjisu
+    * 🏫: SNU Graduate School of Data Science
+    * 📧: simonjisu@snu.ac.kr
+* **Minseok Chae**: @minseokChae1811
+    * 🏫: SNU Department of Mechanical Engineering
+    * 📧: mschae1811@snu.ac.kr
+* **Taehun Kim**: @SSSAMKIM
+    * 🏫: SNU Department of Mechanical Engineering
+    * 📧: crown3633@snu.ac.kr
 ## Prerequisite
 
 For pipenv user
