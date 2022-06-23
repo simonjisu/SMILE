@@ -4,16 +4,16 @@
 
 ## People
 
-* **Yejin Hwang**: @YejinHwang2
+* [**Yejin Hwang**](https://github.com/YejinHwang2):
     * 🏫: SNU Graduate School of Data Science
     * 📧: evergreen97@snu.ac.kr
-* **Jisoo Jang**: @simonjisu
+* [**Jisoo Jang**](https://github.com/simonjisu):
     * 🏫: SNU Graduate School of Data Science
     * 📧: simonjisu@snu.ac.kr
-* **Minseok Chae**: @minseokChae1811
+* [**Minseok Chae**](https://github.com/minseokChae1811): 
     * 🏫: SNU Department of Mechanical Engineering
     * 📧: mschae1811@snu.ac.kr
-* **Taehun Kim**: @SSSAMKIM
+* [**Taehun Kim**](https://github.com/SSSAMKIM):
     * 🏫: SNU Department of Mechanical Engineering
     * 📧: crown3633@snu.ac.kr
 ## Prerequisite
