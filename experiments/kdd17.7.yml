@@ -10,7 +10,7 @@ show_y_index: false
 feature_size: 11  
 hidden_size: 4
 output_size: 1  
-num_layers: 2
+num_layers: 1
 drop_rate: 0.0  
 inner_lr_init: 1
 finetuning_lr_init: 0.1
