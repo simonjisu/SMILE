@@ -104,17 +104,17 @@ class MetaStockDataset(torch.utils.data.Dataset):
             stock_symbol = p.name.rstrip('.csv')
             df_single = self.load_single_stock(p)
             if meta_type == 'train':
-                df_single = df_single.loc[df_single['date'] <= ds_config['val_date']].reset_index(drop=True)
+                df_single = df_single.loc[df_single['date'] <= ds_config['train_date']].reset_index(drop=True)
                 labels_indices = self.get_candidates(df_single)
             else:
                 if meta_type == 'test1':
-                    df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
+                    df_single = df_single.loc[df_single['date'] > ds_config['test_date']].reset_index(drop=True)
                     labels_indices = self.get_candidates(df_single)
                 elif meta_type == 'test2':
-                    df_single = df_single.loc[df_single['date'] <= ds_config['val_date']].reset_index(drop=True)
+                    df_single = df_single.loc[df_single['date'] <= ds_config['train_date']].reset_index(drop=True)
                     labels_indices = self.get_candidates(df_single)
                 elif meta_type == 'test3':
-                    df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
+                    df_single = df_single.loc[df_single['date'] > ds_config['test_date']].reset_index(drop=True)
                     labels_indices = self.get_candidates(df_single)
                 else:
                     raise KeyError('Error argument `meta_type`, should be in (train, test1, test2, test3)')
