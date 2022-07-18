@@ -15,6 +15,7 @@ ipywidgets = "*"
 tensorboard = "*"
 torch = {version = "==1.11.0+cu113", index = "pytorch"}
 pandas = "*"
+tqdm = "*"
 
 [dev-packages]
 torch-tb-profiler = "*"
