@@ -1,7 +1,19 @@
 Experiment,Test Type,Test Accuracy,Test Loss,Train Accuracy,Train Loss
-acl18-hid4.n_inner10_2,test1,0.4955,3.8961,0.5483,0.8872
-acl18-hid4.n_inner10_2,test2,0.5045,3.8062,0.5483,0.8872
-acl18-hid4.n_inner10_2,test3,0.4852,3.8722,0.5483,0.8872
-kdd17-hid4.n_inner10_1,test1,0.4933,3.6812,0.5517,0.8344
-kdd17-hid4.n_inner10_1,test2,0.4967,3.6911,0.5517,0.8344
-kdd17-hid4.n_inner10_1,test3,0.4718,3.6553,0.5517,0.8344
+acl18-hid4.n_inner10_1,test1,0.5028,3.8725,0.5483,0.8872
+acl18-hid4.n_inner10_1,test2,0.4858,3.9564,0.5483,0.8872
+acl18-hid4.n_inner10_1,test3,0.4920,3.8287,0.5483,0.8872
+acl18-hid8.n_inner10_1,test1,0.4885,3.5705,0.5667,0.7848
+acl18-hid8.n_inner10_1,test2,0.4908,3.4991,0.5667,0.7848
+acl18-hid8.n_inner10_1,test3,0.4970,3.5278,0.5667,0.7848
+kdd17-hid16.n_inner10_1,test1,0.5080,3.1641,0.5683,0.7367
+kdd17-hid16.n_inner10_1,test2,0.4948,3.2181,0.5683,0.7367
+kdd17-hid16.n_inner10_1,test3,0.4968,3.1280,0.5683,0.7367
+kdd17-hid8.n_inner10_1,test1,0.5212,3.1854,0.5667,0.7695
+kdd17-hid8.n_inner10_1,test2,0.5107,3.2909,0.5667,0.7695
+kdd17-hid8.n_inner10_1,test3,0.5332,3.0504,0.5667,0.7695
+acl18-hid16.n_inner10_1,test1,0.4950,3.4895,0.6033,0.7289
+acl18-hid16.n_inner10_1,test2,0.5275,3.2361,0.6033,0.7289
+acl18-hid16.n_inner10_1,test3,0.5070,3.3587,0.6033,0.7289
+kdd17-hid4.n_inner10_1,test1,0.4925,3.6089,0.5517,0.8344
+kdd17-hid4.n_inner10_1,test2,0.4887,3.7534,0.5517,0.8344
+kdd17-hid4.n_inner10_1,test3,0.4797,3.6235,0.5517,0.8344
