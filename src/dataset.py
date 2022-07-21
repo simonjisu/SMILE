@@ -72,6 +72,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             'kdd17': {
                 'path': self.data_dir / 'kdd17/price_long_50',
                 'date': self.data_dir / 'kdd17/trading_dates.csv',
+                'universe': self.data_dir / 'kdd17/stock_universe.json', 
                 'train_date': '2015-01-01', 
                 'val_date': '2016-01-01', 
                 'test_date': '2017-01-01',
@@ -82,6 +83,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             'acl18': {
                 'path': self.data_dir / 'stocknet-dataset/price/raw',
                 'date': self.data_dir / 'stocknet-dataset/price/trading_dates.csv',
+                'universe': self.data_dir / 'stocknet-dataset/stock_universe.json',
                 'train_date': '2015-08-01', 
                 'val_date': '2015-10-01', 
                 'test_date': '2016-01-01',

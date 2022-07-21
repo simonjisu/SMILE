@@ -6,6 +6,7 @@ n_lag: 1
 n_stock: 3  
 keep_support_history: true  
 show_y_index: false  
+universe: 0
 
 feature_size: 11  
 hidden_size: 64
