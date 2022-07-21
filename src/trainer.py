@@ -199,7 +199,7 @@ class Trainer():
                     print(f'{s1}{key}: {agg_func(valid_records[key]):.4f}', end=s2)
 
                 # model save best        
-                cur_eval_loss = np.mean(valid_records['Loss'])
+                cur_eval_loss = np.sum(valid_records['Loss'])
                 cur_eval_acc = np.mean(valid_records['Accuracy'])
                 # save by every step 
                 torch.save(model.state_dict(), str(self.ckpt_step_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))

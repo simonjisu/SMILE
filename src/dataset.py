@@ -90,7 +90,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         ds_config = ds_info[dtype]
 
         self.meta_type = meta_type
-        self.window_sizes = [5, 10, 15, 20]
+        self.window_sizes = [5] # [5, 10, 15, 20]
         self.n_sample = n_sample
         self.n_lag = n_lag
         self.n_stock = n_stock
