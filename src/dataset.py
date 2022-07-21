@@ -90,7 +90,8 @@ class MetaStockDataset(torch.utils.data.Dataset):
             }
         }
         ds_config = ds_info[dtype]
-
+        
+        # TODO: universe 별로 불러오기 인자 필요
         self.meta_type = meta_type
         self.window_sizes = [5] # [5, 10, 15, 20]
         self.n_sample = n_sample
@@ -98,6 +99,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.n_stock = n_stock
 
         # get data
+        # TODO: universe 별로 불러오기 
         self.data = {}
         self.candidates = {}
         ps = list((self.data_dir / ds_config['path']).glob('*.csv'))

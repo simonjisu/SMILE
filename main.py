@@ -11,7 +11,7 @@ def main(args):
         setting_file = args.exp
         if '.yml' not in args.exp:
             setting_file += '.yml'
-        setting_file = Path('./experiments') / setting_file
+        setting_file = Path(args.exp_dir) / setting_file
         meta_args = ARGProcessor(setting_file=setting_file)
         data_kwargs = meta_args.get_args(cls=MetaStockDataset)
 
@@ -104,6 +104,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--exp_dir', default='./experiments', type=str)
     parser.add_argument('--exp', default='', type=str)
     parser.add_argument('--meta_test', action='store_true')
     parser.add_argument('--n_test', default=100, type=int)
