@@ -1,6 +1,6 @@
 data_dir: './data'
 dtype: 'kdd17'
-stock_universe: 0  
+stock_universe: 2
 n_sample: 5  
 n_lag: 1
 n_stock: 3  
@@ -15,7 +15,7 @@ drop_rate: 0.0
 inner_lr_init: 1
 finetuning_lr_init: 0.1
 
-exp_name: 'kdd17-baseline'
+exp_name: 'kdd17_u2_baseline'
 log_dir: './logging'
 total_steps: 100000
 n_inner_step: 10
