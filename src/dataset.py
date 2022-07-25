@@ -224,14 +224,11 @@ class MetaStockDataset(torch.utils.data.Dataset):
         if self.tensor_data is None:
             raise ValueError('You Need to generate data first, please call the function')
         else:
-            # Only support for single window size data for now
-            return len(self.tensor_data[5]['support_labels'])
+            return len(self.tensor_data['support_labels'])
 
     def __getitem__(self, index):
-        # Only support for single window size data for now
-        data = self.tensor_data[5]
         t = {}
-        for k, v in data.items():
+        for k, v in self.tensor_data.items():
             t[k] = v[index]        
         return t
 
