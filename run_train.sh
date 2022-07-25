@@ -1,5 +1,5 @@
 #!/bin/bash
-if [ "$#" -eq 0 ]; then 
+if [ "$#" -eq 1 ]; then 
     python -u main.py --exp $1
 elif [ "$2" = "nohup" ]; then
     nohup python -u main.py --exp $1 > $1.log &
