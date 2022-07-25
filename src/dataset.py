@@ -35,9 +35,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
             data_dir: Path | str ='', 
             dtype: str ='kdd17', 
             stock_universe: int =0, 
-            n_sample: int =5,
+            n_sample: int =5,  # n_support
             n_lag: int =1, 
-            n_stock: int =5,
+            n_stock: int =5,  # 
             keep_support_history: bool=False,
             show_y_index: bool=False
         ):

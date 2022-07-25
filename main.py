@@ -41,6 +41,7 @@ def main(args):
             test_results = trainer.meta_test(
                 model=model, 
                 meta_dataset=meta_test, 
+                n_test=args.n_test,
                 record_tensorboard=True
             )
             test_acc = test_results['Task']['Accuracy']
@@ -81,6 +82,7 @@ def main(args):
                 test_results = trainer.meta_test(
                     model=model, 
                     meta_dataset=meta_test,
+                    n_test=args.n_test,
                     record_tensorboard=False
                 )
                 test_acc = test_results['Task']['Accuracy']
@@ -105,5 +107,6 @@ if __name__ == '__main__':
     parser.add_argument('--exp_dir', default='./experiments', type=str)
     parser.add_argument('--exp', default='', type=str)
     parser.add_argument('--meta_test', action='store_true')
+    parser.add_argument('--n_test', default=100, type=int)
     args = parser.parse_args()
     main(args)

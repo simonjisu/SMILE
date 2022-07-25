@@ -238,11 +238,11 @@ class Trainer():
         state_dict = torch.load(best_ckpt)
         return int(best_step), float(train_acc), float(train_loss), state_dict
 
-    def meta_test(self, model, meta_dataset, record_tensorboard: bool=False):
+    def meta_test(self, model, meta_dataset, n_test: int=100, record_tensorboard: bool=False):
         # load model
         model = model.to(self.device)
         # test
-        test_records = self._test(model=model, meta_dataset=meta_dataset)
+        test_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=n_test)
 
         results = defaultdict(dict)
         results['Win']['Accuracy'] = {}
@@ -260,4 +260,27 @@ class Trainer():
                 self.writer.add_scalar(k, agg_func(test_records[key]), 0)
             results['Task'][key] = agg_func(test_records[key])
         return results
+        
+    # def meta_test(self, model, meta_dataset, record_tensorboard: bool=False):
+    #     # load model
+    #     model = model.to(self.device)
+    #     # test
+    #     test_records = self._test(model=model, meta_dataset=meta_dataset)
+
+    #     results = defaultdict(dict)
+    #     results['Win']['Accuracy'] = {}
+    #     results['Win']['Loss'] = {}
+
+    #     for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
+    #         for i, window_size in enumerate(meta_dataset.window_sizes):
+    #             k = f'{meta_dataset.meta_type.capitalize()}-WinSize={window_size}-{key}'
+    #             if record_tensorboard:
+    #                 self.writer.add_scalar(k, test_records[key][i], window_size)
+    #             results['Win'][key][window_size] = test_records[key][i]
+    #         k = f'{meta_dataset.meta_type.capitalize()}-Task-{key}'
+    #         results[k] = agg_func(test_records[key])
+    #         if record_tensorboard:
+    #             self.writer.add_scalar(k, agg_func(test_records[key]), 0)
+    #         results['Task'][key] = agg_func(test_records[key])
+    #     return results
         
