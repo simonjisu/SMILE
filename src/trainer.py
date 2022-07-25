@@ -163,7 +163,7 @@ class Trainer():
         test_step_acc = []
         meta_dataset.generate_all()
         for window_size, tasks in meta_dataset.all_tasks.items():
-            meta_dataset.init_data(tasks, devlce=self.device)
+            meta_dataset.init_data(tasks, device=self.device)
             loader = torch.utils.data.DataLoader(meta_dataset, batch_size=32)
             for batch_data in loader:
                 _, records = self.step_batch(model, batch_data)
