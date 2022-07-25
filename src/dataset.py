@@ -1,3 +1,4 @@
+import json
 import torch
 import numpy as np
 import pandas as pd
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Generator
 from tqdm import tqdm
 from collections import defaultdict
+
 
 def flatten(li: List[Any]) -> Generator:
     """flatten nested list
@@ -32,7 +34,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             meta_type: str ='train', 
             data_dir: Path | str ='', 
             dtype: str ='kdd17', 
-            n_train_stock: int =40, 
+            stock_universe: int =0, 
             n_sample: int =5,
             n_lag: int =1, 
             n_stock: int =5,
@@ -55,6 +57,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
         meta-test (2) different stock, same time
         meta-test (3) different stock, different time
         use `valid_date` to split the train / test set
+
+        the number of training stock was splitted with number of total stocks * 0.8
+        we have 5 stock universe
         """
         super().__init__()
         # for debugging purpose
@@ -91,19 +96,24 @@ class MetaStockDataset(torch.utils.data.Dataset):
         }
         ds_config = ds_info[dtype]
         
-        # TODO: universe 별로 불러오기 인자 필요
         self.meta_type = meta_type
         self.window_sizes = [5] # [5, 10, 15, 20]
         self.n_sample = n_sample
         self.n_lag = n_lag
         self.n_stock = n_stock
+        self.stock_universe = str(stock_universe)
 
         # get data
-        # TODO: universe 별로 불러오기 
         self.data = {}
         self.candidates = {}
-        ps = list((self.data_dir / ds_config['path']).glob('*.csv'))
-        iterator = ps[:n_train_stock] if (meta_type == 'train') or (meta_type == 'test1') else ps[n_train_stock:]
+        ps = list((ds_config['path']).glob('*.csv'))
+        with ds_config['universe'].open('r') as file:
+            universe_dict = json.load(file)
+        
+        universe_key = 'known' if (meta_type == 'train') or (meta_type == 'test1') else 'unknown'
+        universe = universe_dict[self.stock_universe][universe_key]
+        # iterator = ps[:n_train_stock] if (meta_type == 'train') or (meta_type == 'test1') else ps[n_train_stock:]
+        iterator = [p for p in ps if p.name.strip('.csv') in universe]
         for p in tqdm(iterator, total=len(iterator), desc=f'Processing data and candidates for {self.meta_type}'):    
             stock_symbol = p.name.rstrip('.csv')
             df_single = self.load_single_stock(p)
@@ -125,6 +135,8 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
             self.data[stock_symbol] = df_single
             self.candidates[stock_symbol] = labels_indices
+
+        self.tensor_data = None
 
     def get_candidates(self, df):
         condition = df['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
@@ -176,6 +188,54 @@ class MetaStockDataset(torch.utils.data.Dataset):
     def symbols(self):
         return list(self.data.keys())
 
+    # Normal Generator
+    def init_data(self, tasks, device: None | str=None):
+        self.tensor_data = self.map_to_tensor(tasks, device=device)
+        
+    def generate_all(self):
+        all_tasks = defaultdict()
+        for window_size in self.window_sizes:
+            tasks = defaultdict(list)
+            for symbol in self.symbols:
+                data = self.generate_support_query(symbol, window_size)
+                for k, v in data.items():
+                    tasks[k].extend(v)
+            all_tasks[window_size] = tasks
+        
+        self.all_tasks = all_tasks
+
+    def generate_support_query(self, symbol: str, window_size: int):
+        df_stock = self.data[symbol]
+        labels_indices = self.candidates[symbol]
+        y_s = labels_indices[labels_indices >= window_size]
+        y_ss = y_s-window_size
+        support, support_labels = self.generate_data(df_stock, y_start=y_ss, y_end=y_s)
+
+        y_q = y_s + self.n_lag
+        y_qs = y_s - window_size if self.keep_support_history else y_q - window_size
+        query, query_labels = self.generate_data(df_stock, y_start=y_qs, y_end=y_q)
+
+        return {
+            'support': support, 'support_labels': support_labels,
+            'query': query, 'query_labels': query_labels
+        }
+
+    def __len__(self):
+        if self.tensor_data is None:
+            raise ValueError('You Need to generate data first, please call the function')
+        else:
+            # Only support for single window size data for now
+            return len(self.tensor_data[5]['support_labels'])
+
+    def __getitem__(self, index):
+        # Only support for single window size data for now
+        data = self.tensor_data[5]
+        t = {}
+        for k, v in data.items():
+            t[k] = v[index]        
+        return t
+
+    # Meta Generator
     def generate_tasks(self):
         all_tasks = defaultdict()
         for window_size in self.window_sizes:
@@ -236,13 +296,17 @@ class MetaStockDataset(torch.utils.data.Dataset):
         # inputs: (n_sample, y_end-y_start, n_in), labels: (n_sample,)
         return inputs, labels
 
-    def map_to_tensor(self, tasks: Dict[str, Any], device: None | str=None):
+    def map_to_tensor(self, tasks, device: None | str=None):
         if device is None:
             device = torch.device('cpu')
         else:
             device = torch.device(device)
         tensor_tasks = {}
         for k, v in tasks.items():
-            tensor = torch.LongTensor if 'labels' in k else torch.FloatTensor
-            tensor_tasks[k] = tensor(np.array(v)).to(device)
+            tensor_fn = torch.LongTensor if 'labels' in k else torch.FloatTensor
+            tensor = tensor_fn(np.array(v))
+            if ('labels' not in k) and tensor.ndim == 1:
+                tensor = tensor.view(1, -1)
+            tensor_tasks[k] = tensor.to(device)
         return tensor_tasks
+    

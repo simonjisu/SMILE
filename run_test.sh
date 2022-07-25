@@ -1,1 +1,1 @@
-python main.py --meta_test --n_test $1
+python main.py --meta_test

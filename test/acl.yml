@@ -1,6 +1,6 @@
 data_dir: '../data'
 dtype: 'acl18'
-n_train_stock: 40  
+stock_universe: 0  
 n_sample: 5  
 n_lag: 1
 n_stock: 3  

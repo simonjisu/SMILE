@@ -207,7 +207,6 @@ class MetaModel(nn.Module):
         return parameters, kld_loss, z_penalty, support_attn
 
     def validate(self, data, parameters, rt_attn: bool=False):
-        self.manual_model_eval()
         query_X, query_y = data['query'], data['query_labels']
         query_y = query_y.float() if self.output_size == 1 else query_y
         
@@ -215,9 +214,7 @@ class MetaModel(nn.Module):
         query_loss, query_acc = self.predict(
             encoded=query_encoded, parameters=parameters, labels=query_y
         )
-        self.train()
         return query_loss, query_acc, query_attn
-
 
     def cal_total_loss(self, query_loss, kld_loss, z_penalty, beta, gamma, lambda2):
         orthogonality_penalty = self.orthgonality_constraint(list(self.decoder.parameters())[0])
