@@ -112,17 +112,20 @@ class Trainer():
         
         # Outer Loop
         all_total_loss = 0.
-        for window_size, tasks in train_tasks.items(): # window size x (n_sample * n_stock)
-            batch_data = meta_dataset.map_to_tensor(tasks, device=self.device)
-            total_loss, records = self.step_batch(model, batch_data)
-            # version - 2
-            all_total_loss += total_loss
-            for key, v in records.items():
-                # if (key in ['Z', 'Z Prime']):
-                #     self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
-                # else:
-                train_records[key].append(v)
-                self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
+        for window_size, tasks in train_tasks.items():
+            # tasks: number of stocks * 
+            #     Query: (n_sample, 1, T, I) / Support: (n_sample, n_support, T, I)
+            #     Query Labels: (n_sample,) / Support Labels: (n_sample, n_support)
+            for data in meta_dataset.iter_task(tasks):  # iter for number of stocks
+                batch_data = meta_dataset.map_to_tensor(data, device=self.device)
+                total_loss, records = self.step_batch(model, batch_data)
+                all_total_loss += total_loss
+                for key, v in records.items():
+                    # if (key in ['Z', 'Z Prime']):
+                    #     self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
+                    # else:
+                    train_records[key].append(v)
+                    self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
 
         all_total_loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
@@ -142,10 +145,14 @@ class Trainer():
             valid_tasks = meta_dataset.generate_tasks()
 
             for window_size, tasks in valid_tasks.items():
-                batch_data = meta_dataset.map_to_tensor(tasks, device=self.device)
-                _, records = self.step_batch(model, batch_data)
-                valid_step_loss.append(records['Query Loss'])
-                valid_step_acc.append(records['Query Accuracy'])
+                # tasks: number of stocks * 
+                #     Query: (n_sample, 1, T, I) / Support: (n_sample, n_support, T, I)
+                #     Query Labels: (n_sample,) / Support Labels: (n_sample, n_support)
+                for data in meta_dataset.iter_task(tasks):  # iter for number of stocks
+                    batch_data = meta_dataset.map_to_tensor(data, device=self.device)
+                    _, records = self.step_batch(model, batch_data)
+                    valid_step_loss.append(records['Query Loss'])
+                    valid_step_acc.append(records['Query Accuracy'])
 
             valid_records['Accuracy'].append(valid_step_acc)
             valid_records['Loss'].append(valid_step_loss)
@@ -156,27 +163,27 @@ class Trainer():
 
         return valid_records
 
-    def _test(self, model, meta_dataset):
-        model.manual_model_eval()
-        test_records = {'Accuracy': [], 'Loss': []}  # n_valid x window_size 
-        test_step_loss = []
-        test_step_acc = []
-        meta_dataset.generate_all()
-        for window_size, tasks in meta_dataset.all_tasks.items():
-            meta_dataset.init_data(tasks, device=self.device)
-            loader = torch.utils.data.DataLoader(meta_dataset, batch_size=32)
-            for batch_data in loader:
-                _, records = self.step_batch(model, batch_data)
-                test_step_loss.append(records['Query Loss'])
-                test_step_acc.append(records['Query Accuracy'])
+    # def _test(self, model, meta_dataset):
+    #     model.manual_model_eval()
+    #     test_records = {'Accuracy': [], 'Loss': []}  # n_valid x window_size 
+    #     test_step_loss = []
+    #     test_step_acc = []
+    #     meta_dataset.generate_all()
+    #     for window_size, tasks in meta_dataset.all_tasks.items():
+    #         meta_dataset.init_data(tasks, device=self.device)
+    #         loader = torch.utils.data.DataLoader(meta_dataset, batch_size=32)
+    #         for batch_data in loader:
+    #             _, records = self.step_batch(model, batch_data)
+    #             test_step_loss.append(records['Query Loss'])
+    #             test_step_acc.append(records['Query Accuracy'])
 
-            test_records['Accuracy'].append(test_step_acc)
-            test_records['Loss'].append(test_step_loss)
+    #         test_records['Accuracy'].append(test_step_acc)
+    #         test_records['Loss'].append(test_step_loss)
         
-        test_records['Accuracy'] = np.mean(test_records['Accuracy'], axis=0)
-        test_records['Loss'] = np.sum(test_records['Loss'], axis=0)
+    #     test_records['Accuracy'] = np.mean(test_records['Accuracy'], axis=0)
+    #     test_records['Loss'] = np.sum(test_records['Loss'], axis=0)
 
-        return test_records
+    #     return test_records
 
     def meta_train(self, model, meta_dataset):
         model = model.to(self.device)

@@ -100,7 +100,7 @@ class MetaModel(nn.Module):
         # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
         for module in self.children():
             self.training = mode
-            if isinstance(module, nn.Dropout): # or isinstance(module, nn.LayerNorm):
+            if isinstance(module, nn.Dropout) or isinstance(module, nn.LayerNorm):
                 module.train(mode)
 
     def reset_records(self):

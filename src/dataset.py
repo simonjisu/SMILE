@@ -35,11 +35,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
             data_dir: Path | str ='', 
             dtype: str ='kdd17', 
             stock_universe: int =0, 
-            n_sample: int =5,  # n_support
-            n_lag: int =1, 
-            n_stock: int =5,  # 
-            keep_support_history: bool=False,
-            show_y_index: bool=False
+            n_sample: int =5,
+            n_support: int =6,  # n_support
+            n_lag: int =1
         ):
         """
         dataset ref: https://arxiv.org/abs/1810.09936
@@ -66,8 +64,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.labels_dict = {
             'fall': 0, 'rise': 1, 'unchange': 2 
         }
-        self.keep_support_history = keep_support_history
-        self.show_y_index = show_y_index
         # data config
         self.data_dir = Path(data_dir).resolve()
         ds_info = {
@@ -78,17 +74,19 @@ class MetaStockDataset(torch.utils.data.Dataset):
                 'path': self.data_dir / 'kdd17/price_long_50',
                 'date': self.data_dir / 'kdd17/trading_dates.csv',
                 'universe': self.data_dir / 'kdd17/stock_universe.json', 
+                'start_date': '2007-01-01',
                 'train_date': '2015-01-01', 
                 'val_date': '2016-01-01', 
                 'test_date': '2017-01-01',
             },
             # train: (Jan-01-2014 to Aug-01-2015)
-            # vali: (Aug-01-2015 to Oct-01-2015)
+            # val: (Aug-01-2015 to Oct-01-2015)
             # test: (Oct-01-2015 to Jan-01-2016)
             'acl18': {
                 'path': self.data_dir / 'stocknet-dataset/price/raw',
                 'date': self.data_dir / 'stocknet-dataset/price/trading_dates.csv',
                 'universe': self.data_dir / 'stocknet-dataset/stock_universe.json',
+                'start_date': '2014-01-01',
                 'train_date': '2015-08-01', 
                 'val_date': '2015-10-01', 
                 'test_date': '2016-01-01',
@@ -99,8 +97,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.meta_type = meta_type
         self.window_sizes = [5] # [5, 10, 15, 20]
         self.n_sample = n_sample
+        assert n_support % 2 == 0, '`n_support must be a even number'
+        self.n_support = n_support
         self.n_lag = n_lag
-        self.n_stock = n_stock
         self.stock_universe = str(stock_universe)
 
         # get data
@@ -112,13 +111,13 @@ class MetaStockDataset(torch.utils.data.Dataset):
         
         universe_key = 'known' if (meta_type == 'train') or (meta_type == 'test1') else 'unknown'
         universe = universe_dict[self.stock_universe][universe_key]
-        # iterator = ps[:n_train_stock] if (meta_type == 'train') or (meta_type == 'test1') else ps[n_train_stock:]
         iterator = [p for p in ps if p.name.strip('.csv') in universe]
         for p in tqdm(iterator, total=len(iterator), desc=f'Processing data and candidates for {self.meta_type}'):    
             stock_symbol = p.name.rstrip('.csv')
             df_single = self.load_single_stock(p)
             if meta_type == 'train':
-                df_single = df_single.loc[df_single['date'] <= ds_config['train_date']].reset_index(drop=True)
+                cond = df_single['date'].between(ds_config['start_date'], ds_config['train_date'])
+                df_single = df_single.loc[cond].reset_index(drop=True)
                 labels_indices = self.get_candidates(df_single)
             else:
                 if meta_type == 'test1':
@@ -136,12 +135,8 @@ class MetaStockDataset(torch.utils.data.Dataset):
             self.data[stock_symbol] = df_single
             self.candidates[stock_symbol] = labels_indices
 
-        self.tensor_data = None
-
-    def get_candidates(self, df):
-        condition = df['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
-        labels_indices = df.index[condition].to_numpy()
-        return labels_indices
+        self.n_stocks = len(universe)
+        # self.reset_tensor_data()
 
     def load_single_stock(self, p: Path | str):
         def longterm_trend(x: pd.Series, k:int):
@@ -180,57 +175,59 @@ class MetaStockDataset(torch.utils.data.Dataset):
         
         return df_pct
 
-    def check_func(self, x):
+    def get_candidates(self, df):
+        """support candidates"""
         checks = [self.labels_dict['fall'], self.labels_dict['rise']]
-        return np.isin(x.values[0], checks) and np.isin(x.values[1], checks)
+        condition = np.isin(df['label'], checks)
+        labels_indices = df.index[condition].to_numpy()
+        return labels_indices
+
+    # def get_candidates(self, df):
+    #     """support candidates"""
+    #     condition = df['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
+    #     labels_indices = df.index[condition].to_numpy()
+    #     return labels_indices
+
+    # def check_func(self, x):
+    #     checks = [self.labels_dict['fall'], self.labels_dict['rise']]
+    #     return np.isin(x.values[0], checks) and np.isin(x.values[1], checks)
 
     @property
     def symbols(self):
         return list(self.data.keys())
 
     # Normal Generator
-    def init_data(self, tasks, device: None | str=None):
-        self.tensor_data = self.map_to_tensor(tasks, device=device)
+    # def init_data(self, tasks, device: None | str=None):
+    #     self.tensor_data = self.map_to_tensor(tasks, device=device)
         
-    def generate_all(self):
-        all_tasks = defaultdict()
-        for window_size in self.window_sizes:
-            tasks = defaultdict(list)
-            for symbol in self.symbols:
-                data = self.generate_support_query(symbol, window_size)
-                for k, v in data.items():
-                    tasks[k].extend(v)
-            all_tasks[window_size] = tasks
+    # def generate_all(self):
+    #     all_tasks = defaultdict()
+    #     for window_size in self.window_sizes:
+    #         tasks = defaultdict(list)
+    #         for symbol in self.symbols:
+    #             data = self.generate_support_query(symbol, window_size)
+    #             for k, v in data.items():
+    #                 tasks[k].extend(v)
+    #         all_tasks[window_size] = tasks
         
-        self.all_tasks = all_tasks
+    #     self.all_tasks = all_tasks
 
-    def generate_support_query(self, symbol: str, window_size: int):
-        df_stock = self.data[symbol]
-        labels_indices = self.candidates[symbol]
-        y_s = labels_indices[labels_indices >= window_size]
-        y_ss = y_s-window_size
-        support, support_labels = self.generate_data(df_stock, y_start=y_ss, y_end=y_s)
+    # def generate_support_query(self, symbol: str, window_size: int):
+    #     df_stock = self.data[symbol]
+    #     labels_indices = self.candidates[symbol]
+    #     y_s = labels_indices[labels_indices >= window_size]
+    #     y_ss = y_s-window_size
+    #     support, support_labels = self.generate_data(df_stock, y_start=y_ss, y_end=y_s)
 
-        y_q = y_s + self.n_lag
-        y_qs = y_s - window_size if self.keep_support_history else y_q - window_size
-        query, query_labels = self.generate_data(df_stock, y_start=y_qs, y_end=y_q)
+    #     y_q = y_s + self.n_lag
+    #     y_qs = y_q - window_size
+    #     query, query_labels = self.generate_data(df_stock, y_start=y_qs, y_end=y_q)
 
-        return {
-            'support': support, 'support_labels': support_labels,
-            'query': query, 'query_labels': query_labels
-        }
+    #     return {
+    #         'support': support, 'support_labels': support_labels,
+    #         'query': query, 'query_labels': query_labels
+    #     }
 
-    def __len__(self):
-        if self.tensor_data is None:
-            raise ValueError('You Need to generate data first, please call the function')
-        else:
-            return len(self.tensor_data['support_labels'])
-
-    def __getitem__(self, index):
-        t = {}
-        for k, v in self.tensor_data.items():
-            t[k] = v[index]        
-        return t
 
     # Meta Generator
     def generate_tasks(self):
@@ -241,39 +238,50 @@ class MetaStockDataset(torch.utils.data.Dataset):
         return all_tasks
 
     def generate_tasks_per_window_size(self, window_size: int):
-        # tasks: {X: (n_stock, n_sample, window_size, n_in), y: (n_stock, n_sample)}
+        # Query: (n_sample, 1, T, I) / Support: (n_sample, n_support, T, I)
+        # Query Labels: (n_sample,) / Support Labels: (n_sample, n_support)
         tasks = defaultdict(list)
-        for i in range(self.n_stock):
-            symbol = np.random.choice(self.symbols)
-            # data: {X: (n_sample, n_in), y: (n_sample,)}
+        for symbol in self.symbols:
             data = self.generate_task_per_window_size_and_single_stock(symbol, window_size)
             for k, v in data.items():
                 tasks[k].append(v)
-
-        for k, v in tasks.items():
-            tasks[k] = list(flatten(v))
 
         return tasks
 
     def generate_task_per_window_size_and_single_stock(self, symbol: str, window_size: int):
         df_stock = self.data[symbol]
-        # condition: only continious rise or fall
-        # condition = df_stock['label'].rolling(2).apply(self.check_func).shift(-self.n_lag).fillna(0.0).astype(bool)
-        # labels_indices = df_stock.index[condition].to_numpy()
-        # code for jumpped tags like [1(support), 0, 0, 1(query)]
-        # labels_indices = df_stock.index[df_stock['label'].isin([self.labels_dict['fall'], self.labels_dict['rise']])].to_numpy()
+        # filter out unpossible candidates
         labels_indices = self.candidates[symbol]
         labels_candidates = labels_indices[labels_indices >= window_size]
-        y_s = np.array(sorted(np.random.choice(labels_candidates, size=(self.n_sample,), replace=False)))
-        y_ss = y_s-window_size
-        support, support_labels = self.generate_data(df_stock, y_start=y_ss, y_end=y_s)
-        
-        # code for jumpped tags like [1(support), 0, 0, 1(query)]
-        # y_q = labels_indices[np.arange(len(labels_indices))[np.isin(labels_indices, y_s)] + self.n_lag]
-        y_q = y_s + self.n_lag
-        y_qs = y_s - window_size if self.keep_support_history else y_q - window_size
+        idx = self.get_possible_idx(df_stock, labels_candidates)
+        labels_candidates = labels_candidates[idx:]
+
+        # sample query
+        # Query: (n_sample, 1, T, I)
+        # Query Labels: (n_sample, 1)
+        y_q = np.array(np.random.choice(labels_candidates, size=(self.n_sample,), replace=False))
+        print(symbol, y_q)
+        y_qs = y_q - window_size
         query, query_labels = self.generate_data(df_stock, y_start=y_qs, y_end=y_q)
-        
+        query = np.expand_dims(query, 1)
+        query_labels = np.expand_dims(query_labels, 1)
+        # sample support
+        # decided by n_support
+        # Support: (n_sample, n_support, T, I)
+        # Support Labels: (n_sample, n_support)
+        support = []
+        support_labels = []
+        for q in y_q:
+            q_idx = np.arange(len(labels_candidates))[labels_candidates == q][0]
+            rise, fall = self.get_rise_fall(df_stock, labels_candidates, idx=q_idx)
+            y_s = np.concatenate([fall, rise])
+            y_ss = y_s - window_size
+            data_s, label_s = self.generate_data(df_stock, y_start=y_ss, y_end=y_s)
+            support.append(data_s)
+            support_labels.append(label_s)
+        support = np.array(support)
+        support_labels = np.array(support_labels)
+
         return {
             'support': support, 'support_labels': support_labels,
             'query': query, 'query_labels': query_labels
@@ -285,13 +293,26 @@ class MetaStockDataset(torch.utils.data.Dataset):
         labels = []
         for i, j in zip(y_start, y_end):
             inputs.append(df.loc[i:j-1].to_numpy()[:, 1:-1].astype(np.float64))
-            if self.show_y_index:
-                labels.append(j)
-            else:
-                labels.append(df.loc[j].iloc[-1].astype(np.uint8))
+            labels.append(df.loc[j].iloc[-1].astype(np.uint8))
 
         # inputs: (n_sample, y_end-y_start, n_in), labels: (n_sample,)
-        return inputs, labels
+        return np.array(inputs), np.array(labels)
+
+    def get_possible_idx(self, df: pd.DataFrame, labels_candidates: np.ndarray):
+        i = 0
+        while i < len(labels_candidates):
+            rise, fall = self.get_rise_fall(df, labels_candidates, idx=i)
+            if len(rise) + len(fall) == 4:
+                break
+            else:
+                i += 1
+        return i
+
+    def get_rise_fall(self, df: pd.DataFrame, labels_candidates: np.ndarray, idx: int):
+        df_check = df.loc[labels_candidates[:idx], 'label'].sort_index(ascending=False)
+        rise = df_check.index[df_check == self.labels_dict['rise']][:(self.n_support // 2)].to_numpy()
+        fall = df_check.index[df_check == self.labels_dict['fall']][:(self.n_support // 2)].to_numpy()
+        return rise, fall
 
     def map_to_tensor(self, tasks, device: None | str=None):
         if device is None:
@@ -307,3 +328,27 @@ class MetaStockDataset(torch.utils.data.Dataset):
             tensor_tasks[k] = tensor.to(device)
         return tensor_tasks
     
+    def iter_json(self, task, n_iter):
+        for i in range(n_iter):
+            data = {}
+            for k in task.keys():
+                data[k] = task[k][i]
+            yield data
+
+    # def __len__(self):
+    #     if self.tensor_data is None:
+    #         raise ValueError('You Need to generate data first, please call the function')
+    #     else:
+    #         return self.n_stocks
+
+    # def __getitem__(self, index):
+    #     t = {}
+    #     for k, v in self.tensor_data.items():
+    #         t[k] = v[index]        
+    #     return t
+
+    # def set_tensor_data(self, data):
+    #     self.tensor_data = data
+
+    # def reset_tensor_data(self):
+    #     self.tensor_data = None
