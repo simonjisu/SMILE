@@ -4,9 +4,12 @@ stock_universe: 0
 n_sample: 5
 n_lag: 1
 n_support: 4
-
+n_classes: 2
+n_query: 1
+window_sizes: [5, 10, 15, 20]
 
 feature_size: 11  
+embed_size: 8
 hidden_size: 16
 output_size: 1  
 num_layers: 1

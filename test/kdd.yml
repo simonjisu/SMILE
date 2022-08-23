@@ -3,11 +3,15 @@ dtype: 'kdd17'
 stock_universe: 0
 n_sample: 5
 n_lag: 1
-n_support: 4
+n_support: 2  # number of support example in each class
+n_classes: 2
+n_query: 1
+window_sizes: [5, 10, 15, 20]
 
 feature_size: 11  
-hidden_size: 64
-output_size: 1  
+embed_size: 5
+hidden_size: 3
+output_size: 2 
 num_layers: 2
 drop_rate: 0.0  
 inner_lr_init: 1

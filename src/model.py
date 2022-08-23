@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from collections import defaultdict
+from src.dataset import StockDataDict
 
 class LSTM(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, num_layers: int):
@@ -7,7 +9,7 @@ class LSTM(nn.Module):
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, bidirectional=False)
         self.lnorm = nn.LayerNorm(hidden_size)
     
-    def forward(self, x: torch.tensor):
+    def forward(self, x: torch.Tensor):
         # x: (B, T, I)
         o, (h, _) = self.lstm(x) # o: (B, T, H) / h: (1, B, H)
         normed_context = self.lnorm(h[-1, :, :])
@@ -19,7 +21,7 @@ class LSTMAttention(nn.Module):
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, bidirectional=False)
         self.lnorm = nn.LayerNorm(hidden_size)
 
-    def forward(self, x: torch.tensor, rt_attn: bool=False):
+    def forward(self, x: torch.Tensor, rt_attn: bool=False):
         # x: (B, T, I)
         o, (h, _) = self.lstm(x) # o: (B, T, H) / h: (1, B, H)
         h = h[-1, :, :]  # (B, H)
@@ -32,19 +34,42 @@ class LSTMAttention(nn.Module):
         else:
             return normed_context, None
 
-class MappingNet(nn.Module):
+class RelationNet(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.rn = nn.Sequential(
-            nn.Linear(hidden_size, 2*hidden_size, bias=True),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
             nn.ReLU(),
-            nn.Linear(2*hidden_size, 2*hidden_size, bias=True),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
+            nn.ReLU(),
+            nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
+            nn.ReLU()
         )
 
-    def forward(self, x: torch.tensor):
-        # x: (B, H)
-        outputs = self.rn(x)
-        return outputs
+    def forward(self, encoded: torch.Tensor):
+        # encoded: (B, N, K, H)
+        B, N, K, _ = encoded.size()
+        left = torch.repeat_interleave(encoded, K, dim=2)
+        left = torch.repeat_interleave(left, N, dim=1)
+        right = encoded.repeat((1, N, K, 1))
+        x = torch.cat([left, right], dim=-1)  # x: (B, N^2, K^2, 2H) 
+        o = self.rn(x)
+        o = o.view(B, N, N*K*K, -1).mean(2)  # o: (B, N, 2H)
+        return o  
+
+# class MappingNet(nn.Module):
+#     def __init__(self, hidden_size):
+#         super().__init__()
+#         self.rn = nn.Sequential(
+#             nn.Linear(hidden_size, 2*hidden_size, bias=True),
+#             nn.ReLU(),
+#             nn.Linear(2*hidden_size, 2*hidden_size, bias=True),
+#         )
+
+#     def forward(self, x: torch.Tensor):
+#         # x: (B, H)
+#         outputs = self.rn(x)
+#         return outputs
 
 class MetaModel(nn.Module):
     """Meta Model
@@ -55,8 +80,9 @@ class MetaModel(nn.Module):
     def __init__(
             self, 
             feature_size: int, 
+            embed_size: int,
             hidden_size: int, 
-            output_size: int, 
+            output_size: int,  # only should be number of classes
             num_layers: int, 
             drop_rate: float, 
             inner_lr_init: float,
@@ -64,21 +90,21 @@ class MetaModel(nn.Module):
         ):
         super().__init__()
         self.hidden_size = hidden_size
+        self.embed_size = embed_size
         self.output_size = output_size
-        self.parameter_size = hidden_size*output_size
         
         self.inner_lr = nn.Parameter(torch.FloatTensor([inner_lr_init]))
         self.finetuning_lr = nn.Parameter(torch.FloatTensor([finetuning_lr_init]))
 
         # Network
         self.dropout = nn.Dropout(drop_rate)
-        self.feature_transform = nn.Linear(feature_size, hidden_size)  # (B, T, I) > (B, T, H)
-        self.lstm = LSTMAttention(hidden_size, hidden_size, num_layers)  # (B, T, H) > (B, T, H)
-        self.mapping_net = MappingNet(hidden_size)  # (B, H) > (B, 2H)
-        self.decoder = nn.Linear(hidden_size, 2*self.parameter_size, bias=False)  # (B, 2H) > (B, H*O)
+        self.lstm_encoder = LSTMAttention(feature_size, embed_size, num_layers)
+        self.encoder = nn.Linear(embed_size, hidden_size)
+        self.relation_net = RelationNet(hidden_size)
+        self.decoder = nn.Linear(hidden_size, 2*embed_size, bias=False)
 
         # Loss
-        self.loss_fn = nn.CrossEntropyLoss() if output_size >=2 else nn.BCEWithLogitsLoss()
+        self.loss_fn = nn.CrossEntropyLoss()
 
         # Meta Training Mode
         self.meta_train()
@@ -103,29 +129,73 @@ class MetaModel(nn.Module):
             if isinstance(module, nn.Dropout) or isinstance(module, nn.LayerNorm):
                 module.train(mode)
 
-    def reset_records(self):
-        self.records = {}
+    def reset_records(self):        
+        self.records = defaultdict(list)
 
-    def encode(self, inputs, rt_attn: bool=False):
-        inputs = self.feature_transform(inputs)  # (B, T, I) > (B, T, H)
-        inputs = self.dropout(inputs)  # (B, T, H) > (B, T, H)
-        encoded, attn = self.lstm(inputs, rt_attn)  # (B, H)
-        return encoded, attn
+    def encode_lstm(self, inputs, rt_attn: bool=False):
+        """forward data by each stock to avoid trained by other stocks
+        - B: number of samples
+        - N: number of classes=`output_size`
+        - K: number of `n_support`/`n_query`
+        - T: window size
+        - I: input size
+        - E: embedding size
+        - M: M = N * K
+
+        Args:
+            inputs: (B, N, T, I). single stock data.
+
+        Returns:
+            encoded: (B, N*K, E)
+            attn: (B, N*K, T)
+        """
+        B, M, T, I = inputs.size()
+        inputs = inputs.view(B*M, T, I)  # (B*M, T, I) 
+        inputs = self.dropout(inputs)
+        encoded, attn = self.lstm_encoder(inputs, rt_attn)  # (B*N*K, E), (B*N*K, T)
+        return encoded.view(B, M, -1), attn.view(B, M, -1)  # (B, N*K, E), (B, N*K, T)
 
     def forward_encoder(self, inputs, rt_attn: bool=False):
-        # inputs: (B, T, I)
-        # encoded: (B, H)
-        encoded, attn = self.encode(inputs, rt_attn=rt_attn)
-        hs = self.mapping_net(encoded) # (B, H) > (B, 2H)
-        z, kld_loss = self.sample(hs, size=encoded.size(1))  # (B, 2H)
-        return encoded, z, kld_loss, attn
+        """Forward Encoder: from `inputs` to `z`
+        - B: number of samples
+        - N: number of classes=`output_size`
+        - K: number of `n_support`/`n_query`
+        - T: window size
+        - E: embedding size
+        - H: hidden size
+
+        Args:
+            inputs: (B, N, T, I). single stock data.
+
+        Returns:
+            x: (B, E). averaged lstm encoded for each example.
+            z: (B, N, H). sampled parameters for each class.
+            kld_loss: (1,). KL-Divergence Loss between N($\mu_n^e$, $\sigma_n^e$) and N(0, 1).
+            attn: (B, N, K, T). attention weights for each inputs.
+        
+        """
+        l, attn = self.encode_lstm(inputs, rt_attn=rt_attn)  # l: (B, N*K, E)
+        # Reshape the size
+        B = l.size(0)
+        N = self.output_size
+        K = l.size(1) // N
+        if rt_attn:
+            attn = attn.view(B, N, K, -1)  # attn: (B, N, K, T)
+        l_reshape = l.view(B, N, K, -1)  # l_reshape: (B, N, K, E)
+        # Encoder-to-z
+        e = self.encoder(l_reshape)  # e: (B, N, K, H)
+        hs = self.relation_net(e)  # hs: (B, N, 2H)
+        z, kld_loss = self.sample(hs, size=self.hidden_size)  # z: (B, N, H)
+        x = l.mean(1)  # x: (B, E)
+        return x, z, kld_loss, attn
 
     def cal_kl_div(self, dist, z):
         normal = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
         return torch.mean(dist.log_prob(z) - normal.log_prob(z))
 
     def sample(self, distribution_params, size):
-        mean, log_std = distribution_params[:, :size], distribution_params[:, size:]
+        """parameters of a probability distribution in a low-dimensional space `z` for each class"""
+        mean, log_std = torch.split(distribution_params, split_size_or_sections=size, dim=-1)
         if not self.is_meta_train:
             return mean, torch.zeros((1,)).to(mean.device)
         std = torch.exp(log_std)
@@ -134,87 +204,114 @@ class MetaModel(nn.Module):
         kld_loss = self.cal_kl_div(dist, z)
         return z, kld_loss
 
-    def decode(self, z):
-        # z: (B, H)
-        # param_hs: (B, 2*P)
-        param_hs = self.decoder(z)
-        parameters, _ = self.sample(param_hs, size=self.parameter_size)
+    def decode(self, z: torch.Tensor):
+        """decode from `z` to `parameters`
+        - B: number of samples
+        - N: number of classes=`output_size`
+        - E: embedding size
+        - H: hidden size
+
+        Args:
+            z: (B, N, H). sampled parameters for each class.
+
+        Returns:
+            parameters: (B, N, E). $\theta$
+        """
+        param_hs = self.decoder(z)  # param_hs: (B, N, 2H)
+        parameters, _ = self.sample(param_hs, size=self.embed_size)  # (B, N, E)
         return parameters
 
-    def predict(self, encoded, parameters, labels):
-        theta = parameters.view(-1, self.hidden_size, self.output_size)
-        scores = encoded.unsqueeze(1).bmm(theta).squeeze()
+    def predict(self, x, parameters, labels):
+        theta = parameters.permute((0, 2, 1))  # (B, N, E) -> (B, E, N)
+        scores = x.unsqueeze(1).bmm(theta).squeeze(1)  # (B, 1, E) x (B, E, N) = (B, N)
         loss = self.loss_fn(scores, labels)
         acc = self.cal_accuracy(scores, labels)
         return loss, acc
 
-    def forward_decoder(self, z, encoded, labels):
-        parameters = self.decode(z)
-        loss, acc = self.predict(encoded, parameters, labels)
+    def forward_decoder(self, z, x, labels):
+        """Decoder
+        - B: number of samples
+        - N: number of classes=`output_size`
+        - E: embedding size
+        - H: hidden size
+
+        Args:
+            x: (B, E). averaged lstm encoded for each example.
+            z: (B, N, H). sampled parameters for each class.
+
+        Returns:
+            loss: (1,).
+            acc: (1,).
+            parameters: (B, N, E).
+        """
+        parameters = self.decode(z)  # parameters: (B, N, E)
+        loss, acc = self.predict(x, parameters, labels)
         return loss, acc, parameters
 
     def cal_accuracy(self, scores, target):
-        if self.output_size >= 2:
-            pred = scores.argmax(1)
-        else:
-            pred = (torch.sigmoid(scores) >= 0.5).long()
+        pred = scores.argmax(1)
         correct = pred.eq(target).sum()
         acc = correct / len(target)
         return acc
 
     def inner_loop(self, data, n_inner_step: int=5, n_finetuning_step: int=5, rt_attn: bool=False):
-        support_X, support_y = data['support'], data['support_labels']
-        support_y = support_y.float() if self.output_size == 1 else support_y
-        support_encoded, support_z, kld_loss, support_attn = self.forward_encoder(support_X, rt_attn=rt_attn)
+        records = {}
+        s_inputs = data['support']
+        s_labels = data['support_labels']
 
-        # initialize z', 
-        z_prime = support_z
-        train_loss, train_acc, _ = self.forward_decoder(z=z_prime, encoded=support_encoded, labels=support_y)
+        # Forward Encoder
+        s_x, s_z, kld_loss, s_attn = self.forward_encoder(s_inputs, rt_attn=rt_attn)
+
+        # initialize z', Forward Decoder
+        z_prime = s_z
+        s_loss, s_acc, _ = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
         # inner adaptation to z
         for i in range(n_inner_step):
             z_prime.retain_grad()
-            train_loss.backward(retain_graph=True)
+            s_loss.backward(retain_graph=True)
             z_prime = z_prime - self.inner_lr * z_prime.grad.data
+            s_loss, s_acc, parameters = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
 
-            train_loss, train_acc, parameters = self.forward_decoder(z=z_prime, encoded=support_encoded, labels=support_y)
+        # Stop Gradient: 
+        # z_prime.requires_grad == False
+        # s_z.requires_grad == True
+        z_prime = z_prime.detach()  
+        z_penalty = torch.mean((z_prime - s_z)**2)
 
-        z_prime = z_prime.detach()  # Stop Gradient
-        z_penalty = torch.mean((z_prime - support_z)**2)
-
-        self.records['Support Loss'] = train_loss.item()
-        self.records['Support Accuracy'] = train_acc.item()
-        self.records['Inner LR'] = float(self.inner_lr)
-        self.records['Finetuning LR'] = float(self.finetuning_lr)
+        records['Support Loss'] = s_loss.item()
+        records['Support Accuracy'] = s_acc.item()
+        records['Inner LR'] = float(self.inner_lr)
+        records['Finetuning LR'] = float(self.finetuning_lr)
         # self.records['Z Prime'] = z_prime.detach().cpu().numpy()
-        # self.records['Z'] = support_z.detach().cpu().numpy()
+        # self.records['Z'] = s_z.detach().cpu().numpy()
 
         # finetuning adaptation to parameters
         if n_finetuning_step > 0:
             for i in range(n_finetuning_step):
                 parameters.retain_grad()
-                train_loss.backward(retain_graph=True)
+                s_loss.backward(retain_graph=True)
                 parameters = parameters - self.finetuning_lr * parameters.grad
-                train_loss, finetune_train_acc = self.predict(
-                    encoded=support_encoded, parameters=parameters, labels=support_y
+                s_loss, s_acc = self.predict(
+                    x=s_x, parameters=parameters, labels=s_labels
                 )
 
-            self.records['Finetune Loss'] = train_loss.item()
-            self.records['Finetune Accuracy'] = finetune_train_acc.item()
+            records['Finetune Loss'] = s_loss.item()
+            records['Finetune Accuracy'] = s_acc.item()
         else:
-            self.records['Finetune Loss'] = 0.0
-            self.records['Finetune Accuracy'] = 0.0
+            records['Finetune Loss'] = 0.0
+            records['Finetune Accuracy'] = 0.0
             
-        return parameters, kld_loss, z_penalty, support_attn
+        return parameters, kld_loss, z_penalty, s_attn, records
 
     def validate(self, data, parameters, rt_attn: bool=False):
-        query_X, query_y = data['query'], data['query_labels']
-        query_y = query_y.float() if self.output_size == 1 else query_y
+        q_inputs = data['query']
+        q_labels = data['query_labels']
         
-        query_encoded, *_, query_attn = self.forward_encoder(query_X, rt_attn=rt_attn)
-        query_loss, query_acc = self.predict(
-            encoded=query_encoded, parameters=parameters, labels=query_y
+        q_x, *_, q_attn = self.forward_encoder(q_inputs, rt_attn=rt_attn)
+        q_loss, q_acc = self.predict(
+            x=q_x, parameters=parameters, labels=q_labels
         )
-        return query_loss, query_acc, query_attn
+        return q_loss, q_acc, q_attn
 
     def cal_total_loss(self, query_loss, kld_loss, z_penalty, beta, gamma, lambda2):
         orthogonality_penalty = self.orthgonality_constraint(list(self.decoder.parameters())[0])
@@ -245,11 +342,13 @@ class MetaModel(nn.Module):
             rt_attn: bool=False
         ):
         self.reset_records()
-        parameters, kld_loss, z_penalty, support_attn = self.inner_loop(data, n_inner_step, n_finetuning_step, rt_attn)
-        query_loss, query_acc, query_attn = self.validate(data, parameters, rt_attn)
-        return query_loss, query_acc, kld_loss, z_penalty, support_attn, query_attn
+        parameters, kld_loss, z_penalty, s_attn, inner_records = self.inner_loop(
+            data, n_inner_step, n_finetuning_step, rt_attn
+        )
+        q_loss, q_acc, q_attn = self.validate(data, parameters, rt_attn)
+        return q_loss, q_acc, kld_loss, z_penalty, s_attn, q_attn
 
-    def meta_run(self, data, 
+    def meta_run(self, stock_data: StockDataDict, 
             beta: float=0.001, 
             gamma: float=1e-9, 
             lambda2: float=0.1,
@@ -257,17 +356,23 @@ class MetaModel(nn.Module):
             n_finetuning_step:int =5,
             rt_attn: bool=False
         ):
-        query_loss, query_acc, kld_loss, z_penalty, support_attn, query_attn = self(
-            data, n_inner_step, n_finetuning_step, rt_attn
-        )
-        total_loss = self.cal_total_loss(query_loss, kld_loss, z_penalty, beta, gamma, lambda2)
+
+        total_q_loss = 0.
+        total_loss = 0.
+        for data in stock_data:
+            q_loss, q_acc, kld_loss, z_penalty, s_attn, q_attn = self(
+                data, n_inner_step, n_finetuning_step, rt_attn
+            )
+            total_loss += self.cal_total_loss(q_loss, kld_loss, z_penalty, beta, gamma, lambda2)
+            total_q_loss += q_loss
+        
         # logging
-        self.records['Query Loss'] = query_loss.item()
+        self.records['Query Loss'] = total_q_loss.item()
         self.records['Total Loss'] = total_loss.item()
-        self.records['Query Accuracy'] = query_acc.item()
-        if query_attn is not None:
-            self.records['Query Attn'] = query_attn.detach().cpu().numpy()
-        if support_attn is not None:
-            self.records['Support Attn'] = support_attn.detach().cpu().numpy()
+        self.records['Query Accuracy'] = q_acc.item()
+        if q_attn is not None:
+            self.records['Query Attn'] = q_attn.detach().cpu().numpy()
+        if s_attn is not None:
+            self.records['Support Attn'] = s_attn.detach().cpu().numpy()
 
         return total_loss, self.records
