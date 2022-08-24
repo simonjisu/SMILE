@@ -1,8 +1,10 @@
-
 from collections import defaultdict
 import yaml
 import inspect
-import numpy as np
+import torch
+import torch.nn as nn
+import torchmetrics as tm
+from typing import Dict, Tuple, List
 
 class ARGProcessor():
     def __init__(self, setting_file):
@@ -24,24 +26,100 @@ class ARGProcessor():
         }
         return cls_kwargs
 
-class MetricRecords():
+
+class MetricRecorder(nn.Module):
     def __init__(self):
-        self.metrics = {
-            'Support Loss': np.sum, 
-            'Support Accuracy': np.mean, 
-            'Query Loss': np.sum, 
-            'Query Accuracy': np.mean,
-            'Finetune Loss': np.sum,
-            'Finetune Accuracy': np.mean,
-            'Total Loss': np.sum,
-            'Inner LR': np.mean,  # average Learing Rate
-            'Finetuning LR': np.mean, 
-            'KLD Loss': np.sum, 
-            'Z Penalty': np.sum, 
-            'Orthogonality Penalty': np.sum
-        }
+        super().__init__()
+        cs = tm.MetricCollection({
+            'Accuracy': tm.Accuracy(), 
+            'Loss': tm.SumMetric()
+        })
+        self.metrics = tm.MetricCollection([
+            cs.clone('Support_'), cs.clone('Query_'), cs.clone('Finetune_'),
+            tm.MetricCollection({
+                'Inner': tm.MeanMetric(), 'Finetuning': tm.MeanMetric()
+            }, postfix='_LR'),
+            tm.MetricCollection({
+                'Total': tm.SumMetric(), 
+                'KLD': tm.SumMetric(), 
+                'Z': tm.SumMetric(),
+                'Orthogonality': tm.SumMetric()
+            }, postfix='_Loss')
+        ])
 
-        self.records = defaultdict(list)
+        self.reset_window_metrics()
 
-    def update(self):
-        pass
+    @property
+    def keys(self):
+        return list(self.metrics.keys())
+
+    def reset_window_metrics(self):
+        self.window_metrics = defaultdict(dict)
+
+    def update(self, key, scores=None | torch.FloatTensor, targets=None | torch.LongTensor):
+        if 'Accuracy' in key:
+            if targets is None:
+                raise KeyError('Must insert `targets` to calculate accuracy.')
+            self.metrics[key].update(scores, targets)
+        else:
+            self.metrics[key].update(scores)
+
+    def compute(self):
+        results = {}
+        for k in self.keys:
+            m = self.metrics[k].compute()
+            if isinstance(m, torch.Tensor):
+                m = m.cpu().detach().numpy()
+            results[k] = m
+        return results
+
+    def reset(self):
+        for k in self.keys:
+            self.metrics[k].reset()
+
+    def update_window_metrics(self, window_size):
+        results = self.compute()
+        self.window_metrics[window_size] = results
+
+    def get_window_metrics(self, window_size):
+        return self.window_metrics[window_size]
+
+    def compute_total_metrics(self):
+        # averaged by number of window size
+        windows, metrics = list(zip(*self.window_metrics.items()))
+        results = {k: 0.0 for k in self.keys}
+        for m in metrics:
+            for k in self.keys:
+                results[k] += m[k]
+        for k in self.keys:
+            results[k] /= len(windows)  # TODO: calculate average performance of 4 tasks?
+
+        return results
+
+    def get_log_data(self, prefix: str, window_size: int | None=None):
+        log_string = f'{prefix}'
+        if window_size is not None:
+            log_string += f'-WinSize={window_size}'
+            metrics = self.get_window_metrics(window_size)
+        else:
+            metrics = self.compute_total_metrics()
+
+        log_data = {}
+        for key in self.keys:
+            value = metrics[key]
+            log_data[f'{log_string}-{key}'] = value
+
+        return log_data
+
+    def extract_query_loss_acc(self, logs: Dict[str, float] | List[Dict[str, float]]) -> Dict[str, Tuple[float, float]]:
+        to_filter = ['Query_Accuracy', 'Query_Loss']
+        check_func = lambda x: sum([1 if f in x[0] else 0 for f in to_filter if f in x[0]])
+        if isinstance(logs, dict):
+            # cumulated logs
+            filtered = dict(filter(check_func, logs.items()))
+        else:
+            filtered = {}
+            for l in logs:
+                win_filtered = dict(filter(check_func, l.items()))
+                filtered.update(win_filtered)
+        return filtered

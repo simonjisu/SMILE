@@ -356,7 +356,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             data['query_labels'].append(df_stock.loc[q_target, 'label'])
 
             # Supports
-            s_idx = q_idx - 1
+            s_idx = q_idx - self.n_lag
             s_target = labels_indices[s_idx]
             s_fall, s_rise = self.get_rise_fall(df_stock, labels_indices, idx=s_idx, n_select=self.n_support)
             s_end = np.concatenate([s_fall, s_rise])
@@ -398,68 +398,3 @@ class MetaStockDataset(torch.utils.data.Dataset):
         rise = df_check.index[df_check == self.labels_dict['rise']][:n_select].to_numpy()
         fall = df_check.index[df_check == self.labels_dict['fall']][:n_select].to_numpy()
         return fall, rise
-
-    # def map_to_tensor(self, stock_data_dict: StockDataDict, device: None | str=None):
-    #     if device is None:
-    #         device = torch.device('cpu')
-    #     else:
-    #         device = torch.device(device)
-    #     stock_data_dict.to(device)
-    #     return stock_data_dict
-    
-    # def iter_json(self, task, n_iter):
-    #     for i in range(n_iter):
-    #         data = {}
-    #         for k in task.keys():
-    #             data[k] = task[k][i]
-    #         yield data
-
-    # Normal Generator
-    # def init_data(self, tasks, device: None | str=None):
-    #     self.tensor_data = self.map_to_tensor(tasks, device=device)
-        
-    # def generate_all(self):
-    #     all_tasks = defaultdict()
-    #     for window_size in self.window_sizes:
-    #         tasks = defaultdict(list)
-    #         for symbol in self.symbols:
-    #             data = self.generate_support_query(symbol, window_size)
-    #             for k, v in data.items():
-    #                 tasks[k].extend(v)
-    #         all_tasks[window_size] = tasks
-        
-    #     self.all_tasks = all_tasks
-
-    # def generate_support_query(self, symbol: str, window_size: int):
-    #     df_stock = self.data[symbol]
-    #     labels_indices = self.candidates[symbol]
-    #     y_s = labels_indices[labels_indices >= window_size]
-    #     y_ss = y_s-window_size
-    #     support, support_labels = self.generate_data(df_stock, y_start=y_ss, y_end=y_s)
-
-    #     y_q = y_s + self.n_lag
-    #     y_qs = y_q - window_size
-    #     query, query_labels = self.generate_data(df_stock, y_start=y_qs, y_end=y_q)
-
-    #     return {
-    #         'support': support, 'support_labels': support_labels,
-    #         'query': query, 'query_labels': query_labels
-    #     }
-
-    # def __len__(self):
-    #     if self.tensor_data is None:
-    #         raise ValueError('You Need to generate data first, please call the function')
-    #     else:
-    #         return self.n_stocks
-
-    # def __getitem__(self, index):
-    #     t = {}
-    #     for k, v in self.tensor_data.items():
-    #         t[k] = v[index]        
-    #     return t
-
-    # def set_tensor_data(self, data):
-    #     self.tensor_data = data
-
-    # def reset_tensor_data(self):
-    #     self.tensor_data = None

@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
-from collections import defaultdict
+from typing import Dict
+
 from src.dataset import StockDataDict
+from .utils import MetricRecorder
 
 class LSTM(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, num_layers: int):
@@ -35,7 +37,7 @@ class LSTMAttention(nn.Module):
             return normed_context, None
 
 class RelationNet(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size: int):
         super().__init__()
         self.rn = nn.Sequential(
             nn.Linear(2*hidden_size, 2*hidden_size, bias=False),
@@ -57,20 +59,6 @@ class RelationNet(nn.Module):
         o = o.view(B, N, N*K*K, -1).mean(2)  # o: (B, N, 2H)
         return o  
 
-# class MappingNet(nn.Module):
-#     def __init__(self, hidden_size):
-#         super().__init__()
-#         self.rn = nn.Sequential(
-#             nn.Linear(hidden_size, 2*hidden_size, bias=True),
-#             nn.ReLU(),
-#             nn.Linear(2*hidden_size, 2*hidden_size, bias=True),
-#         )
-
-#     def forward(self, x: torch.Tensor):
-#         # x: (B, H)
-#         outputs = self.rn(x)
-#         return outputs
-
 class MetaModel(nn.Module):
     """Meta Model
     Structure Ref: 
@@ -86,7 +74,8 @@ class MetaModel(nn.Module):
             num_layers: int, 
             drop_rate: float, 
             inner_lr_init: float,
-            finetuning_lr_init: float
+            finetuning_lr_init: float,
+            device: str
         ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -109,6 +98,9 @@ class MetaModel(nn.Module):
         # Meta Training Mode
         self.meta_train()
 
+        # Recoder
+        self.recorder = MetricRecorder().to(device)
+
     def meta_train(self):
         self._meta_mode_change(True)
         self.train()
@@ -117,22 +109,21 @@ class MetaModel(nn.Module):
         self._meta_mode_change(False)
         self.manual_model_eval()
 
-    def _meta_mode_change(self, mode=True):
+    def _meta_mode_change(self, mode: bool=True):
         self.is_meta_train = mode
 
-    def manual_model_eval(self, mode=False):
-        # [PyTorch Issue] RuntimeError: cudnn RNN backward can only be called in training mode
-        # cannot use model.eval()
-        # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
+    def manual_model_eval(self, mode: bool=False):
+        """
+        [PyTorch Issue] RuntimeError: cudnn RNN backward can only be called in training mode
+        cannot use `model.eval()`. 
+        see https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
+        """
         for module in self.children():
             self.training = mode
             if isinstance(module, nn.Dropout) or isinstance(module, nn.LayerNorm):
                 module.train(mode)
 
-    def reset_records(self):        
-        self.records = defaultdict(list)
-
-    def encode_lstm(self, inputs, rt_attn: bool=False):
+    def encode_lstm(self, inputs: torch.Tensor, rt_attn: bool=False):
         """forward data by each stock to avoid trained by other stocks
         - B: number of samples
         - N: number of classes=`output_size`
@@ -153,9 +144,12 @@ class MetaModel(nn.Module):
         inputs = inputs.view(B*M, T, I)  # (B*M, T, I) 
         inputs = self.dropout(inputs)
         encoded, attn = self.lstm_encoder(inputs, rt_attn)  # (B*N*K, E), (B*N*K, T)
-        return encoded.view(B, M, -1), attn.view(B, M, -1)  # (B, N*K, E), (B, N*K, T)
+        encoded = encoded.view(B, M, -1)  # (B, N*K, E)
+        if rt_attn:
+            attn = attn.view(B, M, -1)  # (B, N*K, T)
+        return encoded, attn
 
-    def forward_encoder(self, inputs, rt_attn: bool=False):
+    def forward_encoder(self, inputs: torch.Tensor, rt_attn: bool=False):
         """Forward Encoder: from `inputs` to `z`
         - B: number of samples
         - N: number of classes=`output_size`
@@ -189,11 +183,11 @@ class MetaModel(nn.Module):
         x = l.mean(1)  # x: (B, E)
         return x, z, kld_loss, attn
 
-    def cal_kl_div(self, dist, z):
+    def cal_kl_div(self, dist: torch.distributions.Normal, z: torch.Tensor):
         normal = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
         return torch.mean(dist.log_prob(z) - normal.log_prob(z))
 
-    def sample(self, distribution_params, size):
+    def sample(self, distribution_params: torch.Tensor, size: int):
         """parameters of a probability distribution in a low-dimensional space `z` for each class"""
         mean, log_std = torch.split(distribution_params, split_size_or_sections=size, dim=-1)
         if not self.is_meta_train:
@@ -221,14 +215,13 @@ class MetaModel(nn.Module):
         parameters, _ = self.sample(param_hs, size=self.embed_size)  # (B, N, E)
         return parameters
 
-    def predict(self, x, parameters, labels):
+    def predict(self, x: torch.Tensor, parameters: torch.Tensor, labels: torch.Tensor):
         theta = parameters.permute((0, 2, 1))  # (B, N, E) -> (B, E, N)
         scores = x.unsqueeze(1).bmm(theta).squeeze(1)  # (B, 1, E) x (B, E, N) = (B, N)
         loss = self.loss_fn(scores, labels)
-        acc = self.cal_accuracy(scores, labels)
-        return loss, acc
+        return loss, scores
 
-    def forward_decoder(self, z, x, labels):
+    def forward_decoder(self, z: torch.Tensor, x: torch.Tensor, labels: torch.Tensor):
         """Decoder
         - B: number of samples
         - N: number of classes=`output_size`
@@ -245,17 +238,15 @@ class MetaModel(nn.Module):
             parameters: (B, N, E).
         """
         parameters = self.decode(z)  # parameters: (B, N, E)
-        loss, acc = self.predict(x, parameters, labels)
-        return loss, acc, parameters
+        loss, scores = self.predict(x, parameters, labels)
+        return loss, scores, parameters
 
-    def cal_accuracy(self, scores, target):
-        pred = scores.argmax(1)
-        correct = pred.eq(target).sum()
-        acc = correct / len(target)
-        return acc
-
-    def inner_loop(self, data, n_inner_step: int=5, n_finetuning_step: int=5, rt_attn: bool=False):
-        records = {}
+    def inner_loop(
+            self, data: Dict[str, torch.Tensor], 
+            n_inner_step: int=5, 
+            n_finetuning_step: int=5, 
+            rt_attn: bool=False
+        ):
         s_inputs = data['support']
         s_labels = data['support_labels']
 
@@ -264,26 +255,27 @@ class MetaModel(nn.Module):
 
         # initialize z', Forward Decoder
         z_prime = s_z
-        s_loss, s_acc, _ = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
+        s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
         # inner adaptation to z
         for i in range(n_inner_step):
             z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
             z_prime = z_prime - self.inner_lr * z_prime.grad.data
-            s_loss, s_acc, parameters = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
+            s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
 
         # Stop Gradient: 
         # z_prime.requires_grad == False
         # s_z.requires_grad == True
         z_prime = z_prime.detach()  
-        z_penalty = torch.mean((z_prime - s_z)**2)
-
-        records['Support Loss'] = s_loss.item()
-        records['Support Accuracy'] = s_acc.item()
-        records['Inner LR'] = float(self.inner_lr)
-        records['Finetuning LR'] = float(self.finetuning_lr)
-        # self.records['Z Prime'] = z_prime.detach().cpu().numpy()
-        # self.records['Z'] = s_z.detach().cpu().numpy()
+        z_loss = torch.mean((z_prime - s_z)**2)
+        
+        # Record
+        self.recorder.update('Support_Loss', s_loss)
+        self.recorder.update('Support_Accuracy', s_scores, s_labels)
+        self.recorder.update('Inner_LR', float(self.inner_lr))
+        self.recorder.update('Finetuning_LR', float(self.finetuning_lr))
+        self.recorder.update('Z_Loss', z_loss)
+        self.recorder.update('KLD_Loss', kld_loss)
 
         # finetuning adaptation to parameters
         if n_finetuning_step > 0:
@@ -291,88 +283,116 @@ class MetaModel(nn.Module):
                 parameters.retain_grad()
                 s_loss.backward(retain_graph=True)
                 parameters = parameters - self.finetuning_lr * parameters.grad
-                s_loss, s_acc = self.predict(
+                s_loss, s_scores = self.predict(
                     x=s_x, parameters=parameters, labels=s_labels
                 )
-
-            records['Finetune Loss'] = s_loss.item()
-            records['Finetune Accuracy'] = s_acc.item()
+            self.recorder.update('Finetune_Loss', s_loss)
+            self.recorder.update('Finetune_Accuracy', s_scores, s_labels)
         else:
-            records['Finetune Loss'] = 0.0
-            records['Finetune Accuracy'] = 0.0
+            self.recorder.update('Finetune_Loss', torch.zeros_like(s_loss))
+            self.recorder.update('Finetune_Accuracy', torch.zeros_like(s_scores), torch.zeros_like(s_labels))
             
-        return parameters, kld_loss, z_penalty, s_attn, records
+        return parameters, kld_loss, z_loss, s_attn
 
-    def validate(self, data, parameters, rt_attn: bool=False):
+    def validate(
+            self, data: Dict[str, torch.Tensor], 
+            parameters: torch.Tensor, 
+            rt_attn: bool=False
+        ):
         q_inputs = data['query']
         q_labels = data['query_labels']
         
         q_x, *_, q_attn = self.forward_encoder(q_inputs, rt_attn=rt_attn)
-        q_loss, q_acc = self.predict(
+        q_loss, q_scores = self.predict(
             x=q_x, parameters=parameters, labels=q_labels
         )
-        return q_loss, q_acc, q_attn
 
-    def cal_total_loss(self, query_loss, kld_loss, z_penalty, beta, gamma, lambda2):
-        orthogonality_penalty = self.orthgonality_constraint(list(self.decoder.parameters())[0])
-        total_loss = query_loss + beta*kld_loss + gamma*z_penalty + lambda2*orthogonality_penalty
-        # loggings
-        self.records['KLD Loss'] = kld_loss.item()
-        self.records['Z Penalty'] = z_penalty.item()
-        self.records['Orthogonality Penalty'] = orthogonality_penalty.item()
+        # Record
+        self.recorder.update('Query_Loss', q_loss)
+        self.recorder.update('Query_Accuracy', q_scores, q_labels)
+
+        return q_loss, q_scores, q_attn
+
+    def cal_total_loss(self, query_loss, kld_loss, z_loss, beta: float, gamma: float, lambda2: float):
+        orthogonality_loss = self.orthgonality_constraint(list(self.decoder.parameters())[0])
+        total_loss = query_loss + beta*kld_loss + gamma*z_loss + lambda2*orthogonality_loss
         
+        # Record
+        self.recorder.update('Orthogonality_Loss', orthogonality_loss)
+        self.recorder.update('Total_Loss', total_loss)
+
         return total_loss
 
-    def orthgonality_constraint(self, params):
+    def orthgonality_constraint(self, params: torch.Tensor):
         # purpose: encourages the dimensions of the latend code as well as the decoder network to be maximally expressive
-        # number of class x hidden_size x 2(mean, std)
+        # params: (2E, H), 2E = (mean, std)
         p_dot = params.mm(params.transpose(0, 1))
         p_norm = torch.norm(params, dim=1, keepdim=True) + 1e-15
         corr = p_dot / p_norm.mm(p_norm.transpose(0, 1))
-        corr.masked_fill_(corr>1.0, 1.0)
-        corr.masked_fill_(corr<-1.0, -1.0)
+        corr.masked_fill_(corr >  1.0,  1.0)
+        corr.masked_fill_(corr < -1.0, -1.0)
         I = torch.eye(corr.size(0)).to(corr.device)
-        orthogonality_penalty = torch.mean((corr - I)**2)
-        return orthogonality_penalty
+        orthogonality_loss = torch.mean((corr - I)**2)
+        return orthogonality_loss
 
     def forward(
-            self, data, 
-            n_inner_step: int=5, 
-            n_finetuning_step:int =5, 
-            rt_attn: bool=False
-        ):
-        self.reset_records()
-        parameters, kld_loss, z_penalty, s_attn, inner_records = self.inner_loop(
-            data, n_inner_step, n_finetuning_step, rt_attn
-        )
-        q_loss, q_acc, q_attn = self.validate(data, parameters, rt_attn)
-        return q_loss, q_acc, kld_loss, z_penalty, s_attn, q_attn
-
-    def meta_run(self, stock_data: StockDataDict, 
+            self, data: Dict[str, torch.Tensor], 
             beta: float=0.001, 
             gamma: float=1e-9, 
-            lambda2: float=0.1,
+            lambda2: float=0.1, 
             n_inner_step: int=5, 
-            n_finetuning_step:int =5,
+            n_finetuning_step: int=5, 
             rt_attn: bool=False
         ):
-
-        total_q_loss = 0.
-        total_loss = 0.
-        for data in stock_data:
-            q_loss, q_acc, kld_loss, z_penalty, s_attn, q_attn = self(
-                data, n_inner_step, n_finetuning_step, rt_attn
-            )
-            total_loss += self.cal_total_loss(q_loss, kld_loss, z_penalty, beta, gamma, lambda2)
-            total_q_loss += q_loss
+        parameters, kld_loss, z_loss, s_attn = self.inner_loop(
+            data, n_inner_step, n_finetuning_step, rt_attn
+        )
+        q_loss, q_scores, q_attn = self.validate(data, parameters, rt_attn)
+        total_loss = self.cal_total_loss(q_loss, kld_loss, z_loss, beta, gamma, lambda2)
         
-        # logging
-        self.records['Query Loss'] = total_q_loss.item()
-        self.records['Total Loss'] = total_loss.item()
-        self.records['Query Accuracy'] = q_acc.item()
-        if q_attn is not None:
-            self.records['Query Attn'] = q_attn.detach().cpu().numpy()
-        if s_attn is not None:
-            self.records['Support Attn'] = s_attn.detach().cpu().numpy()
+        return total_loss, q_scores, s_attn, q_attn
 
-        return total_loss, self.records
+    def meta_run(
+            self, tasks: Dict[int, StockDataDict],
+            beta: float=0.001, 
+            gamma: float=1e-9, 
+            lambda2: float=0.1, 
+            n_inner_step: int=5, 
+            n_finetuning_step: int=5, 
+            rt_attn: bool=False,
+            device: torch.device=torch.device('cpu')
+        ):
+        # Outer Loop
+        all_total_loss = 0.
+        self.recorder.reset_window_metrics()
+        for window_size, stock_data in tasks.items():
+            # stock_data: StockDataDict
+            # - query: (n_stocks, B, N*K[n_query], T, I)
+            # - query_labels: (n_stocks, B)
+            # - support: (n_stocks, B, N*K[n_support], T, I)
+            # - support_labels: (n_stocks, B)
+            stock_data.to(device)
+            # Reset record: only update for a single window size with `number of stocks`
+            self.recorder.reset()  
+            for data in stock_data:
+                # Inner Loop
+                total_loss, *_ = self(
+                    data=data, 
+                    beta=beta, 
+                    gamma=gamma, 
+                    lambda2=lambda2, 
+                    n_inner_step=n_inner_step, 
+                    n_finetuning_step=n_finetuning_step, 
+                    rt_attn=rt_attn
+                )
+                all_total_loss += total_loss
+
+            # Update record for window size 
+            self.recorder.update_window_metrics(window_size)
+
+        # TODO: calculate average performance of 4 tasks?
+        average_total_loss = all_total_loss / len(tasks)
+        return average_total_loss
+
+    def meta_predict(self):
+        raise NotImplementedError('TODO')

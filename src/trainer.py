@@ -4,6 +4,7 @@ import numpy as np
 from collections import defaultdict
 from pathlib import Path 
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 class Trainer():
     def __init__(
@@ -41,22 +42,6 @@ class Trainer():
         
         self.exp_name = exp_name
         self.log_dir = Path(log_dir).resolve()
-
-        # aggregate method by window sizes
-        self.log_keys = {
-            'Support Loss': np.sum, 
-            'Support Accuracy': np.mean, 
-            'Query Loss': np.sum, 
-            'Query Accuracy': np.mean,
-            'Finetune Loss': np.sum,
-            'Finetune Accuracy': np.mean,
-            'Total Loss': np.sum,
-            'Inner LR': np.mean,  # average Learing Rate
-            'Finetuning LR': np.mean, 
-            'KLD Loss': np.sum, 
-            'Z Penalty': np.sum, 
-            'Orthogonality Penalty': np.sum
-        }
         
     def init_experiments(self, exp_num=None, record_tensorboard: bool=True):
         # check if exp exists
@@ -76,160 +61,114 @@ class Trainer():
         if not self.ckpt_step_path.exists():
             self.ckpt_step_path.mkdir()
 
-    # def map_to_tensor(self, tasks, device: None | str=None):
-    #     if device is None:
-    #         device = torch.device('cpu')
-    #     else:
-    #         device = torch.device(device)
-    #     tensor_tasks = {}
-    #     for k, v in tasks.items():
-    #         tensor_fn = torch.LongTensor if 'labels' in k else torch.FloatTensor
-    #         tensor = tensor_fn(np.array(v))
-    #         if ('labels' not in k) and tensor.ndim == 1:
-    #             tensor = tensor.view(1, -1)
-    #         tensor_tasks[k] = tensor.to(device)
-    #     return tensor_tasks
+    def get_best_results(self, exp_num, record_tensorboard: bool=True):
+        self.init_experiments(exp_num=exp_num, record_tensorboard=record_tensorboard)
+        best_ckpt = sorted(
+            (self.ckpt_step_path).glob('*.ckpt'),
+            key=lambda x: x.name.split('-')[1], 
+            reverse=True
+        )[0]
+        best_step, train_acc, train_loss = best_ckpt.name.rstrip('.ckpt').split('-')
+        state_dict = torch.load(best_ckpt)
+        return int(best_step), float(train_acc), float(train_loss), state_dict
 
-    def step_batch(self, model, batch_data):
-        total_loss, records = model.meta_run(
-            data=batch_data, 
-            beta=self.beta, 
-            gamma=self.gamma, 
-            lambda2=self.lambda2, 
-            n_inner_step=self.n_inner_step, 
-            n_finetuning_step=self.n_finetuning_step, 
-            rt_attn=False
-        )
-        return total_loss, records
-
-    def _train(self, model, meta_dataset, optim, optim_lr, step):
+    def _train(self, model, meta_dataset, optim, optim_lr):
         # Meta Train
         model.meta_train()
         optim.zero_grad()
         optim_lr.zero_grad()
         train_tasks = meta_dataset.generate_tasks()
-        train_records = {k: [] for k in self.log_keys.keys()}
-        
-        # Outer Loop
-        all_total_loss = 0.
-        for window_size, tasks in train_tasks.items():
-            # tasks: number of stocks * 
-            #     Query: (n_sample, 1, T, I) / Support: (n_sample, n_support, T, I)
-            #     Query Labels: (n_sample,) / Support Labels: (n_sample, n_support)
-            for data in meta_dataset.iter_task(tasks):  # iter for number of stocks
-                batch_data = meta_dataset.map_to_tensor(data, device=self.device)
-                total_loss, records = self.step_batch(model, batch_data)
-                all_total_loss += total_loss
-                for key, v in records.items():
-                    # if (key in ['Z', 'Z Prime']):
-                    #     self.writer.add_histogram(f'{key}-WinSize={window_size}', records[key], step)
-                    # else:
-                    train_records[key].append(v)
-                    self.writer.add_scalar(f'Train-WinSize={window_size}-{key}', v, step)
 
-        all_total_loss.backward()
+        average_total_loss = model.meta_run(
+            tasks=train_tasks,
+            beta=self.beta, 
+            gamma=self.gamma, 
+            lambda2=self.lambda2, 
+            n_inner_step=self.n_inner_step, 
+            n_finetuning_step=self.n_finetuning_step, 
+            rt_attn=False,
+            device=self.device
+        )
+
+        average_total_loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
         nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
         optim.step()
         optim_lr.step()
 
-        return train_records
+        return 
 
-    def _valid(self, model, meta_dataset, n_valid: int):
+    def _valid(self, model, meta_dataset, n_valid: int, prefix: str):
         # turn-off dropout and sample by mean
         model.meta_valid()
-        valid_records = {'Accuracy': [], 'Loss': []}  # n_valid x window_size 
-        for val_step in range(n_valid):
-            valid_step_loss = []
-            valid_step_acc = []
+        valid_logs = defaultdict(list)
+        valid_win_logs = defaultdict(list)
+
+        pregress = tqdm(range(n_valid), total=n_valid, desc=f'Running {prefix}')
+        for val_idx in pregress:
             valid_tasks = meta_dataset.generate_tasks()
+            
+            _ = model.meta_run(
+                tasks=valid_tasks,
+                beta=self.beta, 
+                gamma=self.gamma, 
+                lambda2=self.lambda2, 
+                n_inner_step=self.n_inner_step, 
+                n_finetuning_step=self.n_finetuning_step, 
+                rt_attn=False,
+                device=self.device
+            )
 
-            for window_size, tasks in valid_tasks.items():
-                # tasks: number of stocks * 
-                #     Query: (n_sample, 1, T, I) / Support: (n_sample, n_support, T, I)
-                #     Query Labels: (n_sample,) / Support Labels: (n_sample, n_support)
-                for data in meta_dataset.iter_task(tasks):  # iter for number of stocks
-                    batch_data = meta_dataset.map_to_tensor(data, device=self.device)
-                    _, records = self.step_batch(model, batch_data)
-                    valid_step_loss.append(records['Query Loss'])
-                    valid_step_acc.append(records['Query Accuracy'])
+            logs, window_logs = self.get_logs(meta_dataset, model, prefix)
+            
+            # log by window: List[Dict[str, float]]
+            for log_string, value in window_logs.items():
+                valid_win_logs[log_string].append(value)
 
-            valid_records['Accuracy'].append(valid_step_acc)
-            valid_records['Loss'].append(valid_step_loss)
-        
-        # aggregate window loss and accruacy: mean by n_valid
-        valid_records['Accuracy'] = np.mean(valid_records['Accuracy'], axis=0)
-        valid_records['Loss'] = np.sum(valid_records['Loss'], axis=0)
+            # log all windows: averaged by number of window size
+            for log_string, value in logs.items():
+                valid_logs[log_string].append(value)
+        pregress.close()
 
-        return valid_records
+        for k, v in valid_win_logs.items():
+            valid_win_logs[k] = (np.mean(v), np.std(v))
 
-    # def _test(self, model, meta_dataset):
-    #     model.manual_model_eval()
-    #     test_records = {'Accuracy': [], 'Loss': []}  # n_valid x window_size 
-    #     test_step_loss = []
-    #     test_step_acc = []
-    #     meta_dataset.generate_all()
-    #     for window_size, tasks in meta_dataset.all_tasks.items():
-    #         meta_dataset.init_data(tasks, device=self.device)
-    #         loader = torch.utils.data.DataLoader(meta_dataset, batch_size=32)
-    #         for batch_data in loader:
-    #             _, records = self.step_batch(model, batch_data)
-    #             test_step_loss.append(records['Query Loss'])
-    #             test_step_acc.append(records['Query Accuracy'])
+        for k, v in valid_logs.items():
+            valid_logs[k] = (np.mean(v), np.std(v))
 
-    #         test_records['Accuracy'].append(test_step_acc)
-    #         test_records['Loss'].append(test_step_loss)
-        
-    #     test_records['Accuracy'] = np.mean(test_records['Accuracy'], axis=0)
-    #     test_records['Loss'] = np.sum(test_records['Loss'], axis=0)
+        return valid_logs, valid_win_logs
 
-    #     return test_records
-
-    def meta_train(self, model, meta_dataset):
+    def meta_train(self, model, meta_dataset, print_log: bool=True):
         model = model.to(self.device)
         lr_list = ['inner_lr', 'finetuning_lr']
         params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]
         lr_params = [x[1] for x in list(filter(lambda k: k[0] in lr_list, model.named_parameters()))]
         optim = torch.optim.Adam(params, lr=self.outer_lr, weight_decay=self.lambda1)
         optim_lr = torch.optim.Adam(lr_params, lr=self.outer_lr, weight_decay=self.lambda1)
+        
         best_eval_acc = 0.0
 
         for step in range(self.total_steps):
             # Meta Train
-            train_records = self._train(model, meta_dataset=meta_dataset, optim=optim, optim_lr=optim_lr, step=step)
-            
+            self._train(model, meta_dataset=meta_dataset, optim=optim, optim_lr=optim_lr)
+
             if (step % self.print_step == 0) or (step == self.total_steps-1):
+                prefix = 'Train'
+                train_logs, train_win_logs = self.get_logs(meta_dataset, model, prefix)
+                self.log_results(train_logs, train_win_logs, prefix, step=step, print_log=print_log)
 
-                # logging summary(aggregate score for all window size tasks)
-                for key, agg_func in self.log_keys.items():
-                    self.writer.add_scalar(f'Train-{key}', agg_func(train_records[key]), step)
-
-                print(f'[Meta Train]({step+1}/{self.total_steps})')
-                for i, (key, agg_func) in enumerate(self.log_keys.items()):
-                    s1 = '  ' if (i == 0) or (i == 6) else ''
-                    s2 = '\n' if (i == 5) else " | "
-                    print(f'{s1}{key}: {agg_func(train_records[key]):.4f}', end=s2)
-                print()
-                
             # Meta Valid
             if (step % self.every_valid_step == 0) or (step == self.total_steps-1):
-                valid_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step)
+                prefix = 'Valid'
+                valid_logs, valid_win_logs = self._valid(
+                    model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step, prefix=prefix
+                )
+                self.log_results(valid_logs, valid_win_logs, prefix, step=step, print_log=print_log)
                 
-                # record
-                for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
-                    for i, window_size in enumerate(meta_dataset.window_sizes):
-                        self.writer.add_scalar(f'Valid-WinSize={window_size}-{key}', valid_records[key][i], step)
-                    self.writer.add_scalar(f'Valid-Task {key}', agg_func(valid_records[key]), step)
-
-                print(f'[Meta Valid]({step+1}/{self.total_steps})')
-                for i, (key, agg_func) in enumerate(zip(['Accuracy', 'Loss'], [np.mean, np.sum])):
-                    s1 = '  ' if i == 0 else ''
-                    s2 = ' | ' if i == 0 else '\n'
-                    print(f'{s1}{key}: {agg_func(valid_records[key]):.4f}', end=s2)
-
                 # model save best        
-                cur_eval_loss = np.sum(valid_records['Loss'])
-                cur_eval_acc = np.mean(valid_records['Accuracy'])
+                cur_eval_loss = valid_logs[f'{prefix}-Query_Loss'][0]
+                cur_eval_acc = valid_logs[f'{prefix}-Query_Accuracy'][0]
+                
                 # save by every step 
                 torch.save(model.state_dict(), str(self.ckpt_step_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
                 # save best
@@ -237,57 +176,73 @@ class Trainer():
                     best_eval_acc = cur_eval_acc 
                     torch.save(model.state_dict(), str(self.ckpt_path / f'best_model.ckpt'))
 
-    def get_best_results(self, exp_num, record_tensorboard: bool=True):
-        self.init_experiments(exp_num=exp_num, record_tensorboard=record_tensorboard)
-        # best_ckpt = sorted((self.ckpt_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
-        best_ckpt = sorted((self.ckpt_step_path).glob('*.ckpt'), key=lambda x: x.name.split('-')[1], reverse=True)[0]
-        best_step, train_acc, train_loss = best_ckpt.name.rstrip('.ckpt').split('-')
-        state_dict = torch.load(best_ckpt)
-        return int(best_step), float(train_acc), float(train_loss), state_dict
-
-    def meta_test(self, model, meta_dataset, n_test: int=100, record_tensorboard: bool=False):
+    def meta_test(self, model, meta_dataset, n_test: int=100, print_log: bool=True):
         # load model
         model = model.to(self.device)
         # test
-        test_records = self._valid(model=model, meta_dataset=meta_dataset, n_valid=n_test)
-
-        results = defaultdict(dict)
-        results['Win']['Accuracy'] = {}
-        results['Win']['Loss'] = {}
-
-        for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
-            for i, window_size in enumerate(meta_dataset.window_sizes):
-                k = f'{meta_dataset.meta_type.capitalize()}-WinSize={window_size}-{key}'
-                if record_tensorboard:
-                    self.writer.add_scalar(k, test_records[key][i], window_size)
-                results['Win'][key][window_size] = test_records[key][i]
-            k = f'{meta_dataset.meta_type.capitalize()}-Task-{key}'
-            results[k] = agg_func(test_records[key])
-            if record_tensorboard:
-                self.writer.add_scalar(k, agg_func(test_records[key]), 0)
-            results['Task'][key] = agg_func(test_records[key])
-        return results
+        prefix = meta_dataset.meta_type.capitalize()
+        test_logs, test_win_logs = self._valid(
+            model=model, meta_dataset=meta_dataset, n_valid=n_test, prefix=prefix
+        )
+        self.log_results(test_logs, test_win_logs, prefix, step=0, print_log=print_log)
         
-    # def meta_test(self, model, meta_dataset, record_tensorboard: bool=False):
-    #     # load model
-    #     model = model.to(self.device)
-    #     # test
-    #     test_records = self._test(model=model, meta_dataset=meta_dataset)
+        test_acc_loss = model.recorder.extract_query_loss_acc(test_logs)
+        test_win_acc_loss = model.recorder.extract_query_loss_acc(test_win_logs)
+        return test_acc_loss, test_win_acc_loss
 
-    #     results = defaultdict(dict)
-    #     results['Win']['Accuracy'] = {}
-    #     results['Win']['Loss'] = {}
+    def get_logs(self, meta_dataset, model, prefix: str):
+        window_logs = {}
+        for window_size in meta_dataset.window_sizes:
+            log_data = model.recorder.get_log_data(prefix=prefix, window_size=window_size)
+            window_logs.update(log_data)
 
-    #     for key, agg_func in zip(['Accuracy', 'Loss'], [np.mean, np.sum]):
-    #         for i, window_size in enumerate(meta_dataset.window_sizes):
-    #             k = f'{meta_dataset.meta_type.capitalize()}-WinSize={window_size}-{key}'
-    #             if record_tensorboard:
-    #                 self.writer.add_scalar(k, test_records[key][i], window_size)
-    #             results['Win'][key][window_size] = test_records[key][i]
-    #         k = f'{meta_dataset.meta_type.capitalize()}-Task-{key}'
-    #         results[k] = agg_func(test_records[key])
-    #         if record_tensorboard:
-    #             self.writer.add_scalar(k, agg_func(test_records[key]), 0)
-    #         results['Task'][key] = agg_func(test_records[key])
-    #     return results
-        
+        logs = model.recorder.get_log_data(prefix=prefix, window_size=None)
+        return logs, window_logs
+
+    def log_results(self, logs, window_logs, prefix, step, print_log=False):
+        # log by window
+        # if prefix == 'Train': window_logs = list
+        # else: window_logs = dict
+        for log_string, value in window_logs.items():
+            if prefix != 'Train':
+                # tuple for (mean, std) at Valid, Test mode
+                value = value[0]
+            self.writer.add_scalar(log_string, value, step)
+
+        # log all windows: averaged by number of window size
+        for log_string, value in logs.items():
+            if prefix != 'Train':
+                # tuple for (mean, std) at Valid, Test mode
+                value = value[0]
+            self.writer.add_scalar(log_string, value, step)
+
+        if print_log:
+            def extract(prefix, key, logs):
+                if prefix == 'Train':
+                    mean = logs[f'{prefix}-{key}']
+                    std = None
+                else:
+                    mean, std = logs[f'{prefix}-{key}']
+
+                s = f'{mean:.4f}'
+                if std is not None:
+                    s += f' +/- {std:.4f}'
+                return s
+
+            s_acc = extract(prefix, 'Support_Accuracy', logs)
+            s_loss = extract(prefix, 'Support_Loss', logs)
+            q_acc = extract(prefix, 'Query_Accuracy', logs)
+            q_loss = extract(prefix, 'Query_Loss', logs)
+            f_acc = extract(prefix, 'Finetune_Accuracy', logs)
+            f_loss = extract(prefix, 'Finetune_Loss', logs)
+            kld_loss = extract(prefix, 'KLD_Loss', logs)
+            oth_loss = extract(prefix, 'Orthogonality_Loss', logs)
+            z_loss = extract(prefix, 'Z_Loss', logs)
+            total_loss = extract(prefix, 'Total_Loss', logs)
+
+            print(f'[Meta {prefix}]({step+1}/{self.total_steps})')
+            print(f'  - [Support] Loss: {s_loss}, Accuracy: {s_acc}')
+            print(f'  - [Query] Loss: {q_loss}, Accuracy: {q_acc}')
+            print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')
+            print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
+            print()
