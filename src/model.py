@@ -70,7 +70,7 @@ class MetaModel(nn.Module):
             feature_size: int, 
             embed_size: int,
             hidden_size: int, 
-            output_size: int,  # only should be number of classes
+            n_classes: int,  # only should be number of classes
             num_layers: int, 
             drop_rate: float, 
             inner_lr_init: float,
@@ -80,7 +80,7 @@ class MetaModel(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.embed_size = embed_size
-        self.output_size = output_size
+        self.output_size = n_classes
         
         self.inner_lr = nn.Parameter(torch.FloatTensor([inner_lr_init]))
         self.finetuning_lr = nn.Parameter(torch.FloatTensor([finetuning_lr_init]))

@@ -5,13 +5,11 @@ n_sample: 5
 n_lag: 1
 n_support: 2
 n_classes: 2
-n_query: 1
 window_sizes: [5, 10, 15, 20]
 
 feature_size: 11  
 embed_size: 8
 hidden_size: 16
-output_size: 2 
 num_layers: 1
 drop_rate: 0.0  
 inner_lr_init: 1
@@ -19,11 +17,11 @@ finetuning_lr_init: 0.1
 
 exp_name: 'kdd17_u0_baseline'
 log_dir: './logging'
-total_steps: 10
+total_steps: 100000
 n_inner_step: 10
 n_finetuning_step: 0
-n_valid_step: 5
-every_valid_step: 4
+n_valid_step: 10
+every_valid_step: 500
 beta: 0.001  
 gamma: 1.0e-8  
 lambda1: 1.0e-9  
@@ -31,4 +29,4 @@ lambda2: 0.1
 outer_lr: 1.0e-4
 clip_value: 0.1
 device: 'cuda'
-print_step: 2
+print_step: 250

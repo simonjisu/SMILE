@@ -100,7 +100,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
             stock_universe: int =0, 
             n_sample: int =5,
             n_support: int =4, 
-            n_query: int =1,
             n_lag: int =1,
             n_classes: int =2,
             window_sizes: List[int] =[5, 10, 15, 20]
@@ -174,7 +173,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.n_sample = n_sample
         assert n_support % 2 == 0, '`n_support must be a even number'
         self.n_support = n_support
-        self.n_query = n_query
         self.n_lag = n_lag
         self.stock_universe = str(stock_universe)
         self.n_classes = n_classes
@@ -297,9 +295,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
         For each single stock and single window size `T`, 
         first, choose target data in `t_start`:`t_end-1`
         
-        Data: n_classes=2, n_query=1. It chooses the data by latest rise & fall 
+        Data: n_classes=2. It chooses the data by latest rise & fall 
             in `t_start`:`t_end-1`, to guess `t_end` step
-        - Query: (n_sample, n_query*n_classes, T, I)
+        - Query: (n_sample, 1, T, I)
         - Support: (n_sample, n_support*n_classes, T, I)
         
         Labels: both with `t_e` data as label
@@ -364,7 +362,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
     def generate_data(self, df: pd.DataFrame, y_start: np.ndarray, y_end: np.ndarray):
         """
-        n_data = n_support*n_classes or n_query*n_classes
+        n_data = n_support*n_classes or 1
         inputs: (n_data, win_size, n_in)
         labels: (n_data,)
 
