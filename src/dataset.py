@@ -306,11 +306,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
         - Query Labels: (n_sample,)
         - Support Labels: (n_sample,) 
 
-        
-        (x) Masks: target mask for the input data of the classes
-        - Query Masks: (n_sample, n_query*n_classes)
-        - Support Masks: (n_sample, n_support*n_classes) 
-
         Args:
             symbol (str): stock symbol
             window_size (int): window size
@@ -329,45 +324,40 @@ class MetaStockDataset(torch.utils.data.Dataset):
             if self.check_condition(array):
                 break
 
-        # index candidates for queries
-        # satisfied condition label index | smallest support index | smallest query index
-        candidates = labels_indices[(i+2):]  
+        # satisfied condition label index 
+        candidates = labels_indices[(i+1):]  # query candidates
 
         data = dict(
             query = [],
             query_labels = [],
-            # query_masks = [],
             support = [],
             support_labels = [],
-            # support_masks = []
         )
 
         y_q = np.random.choice(candidates, size=(self.n_sample,), replace=False)   # index in the dataframe
         for q_target in y_q:
             # Queries
             q_idx = np.arange(len(labels_indices))[labels_indices == q_target][0]  # get the index of label data
-            q_fall, q_rise = self.get_rise_fall(df_stock, labels_indices, idx=q_idx, n_select=self.n_query)
-            q_end = np.concatenate([q_fall, q_rise])
+            q_end = np.array([q_target]) 
             q_start = q_end - window_size
-            q_data, q_mask = self.generate_data(df_stock, y_start=q_start, y_end=q_end)
-
+            q_data, q_labels = self.generate_data(df_stock, y_start=q_start, y_end=q_end)
+            
             data['query'].append(q_data)
-            # data['query_masks'].append(q_mask)
-            data['query_labels'].append(df_stock.loc[q_target, 'label'])
+            data['query_labels'].append(q_labels[0])  # (1,)
 
             # Supports
-            s_idx = q_idx - self.n_lag
-            s_target = labels_indices[s_idx]
-            s_fall, s_rise = self.get_rise_fall(df_stock, labels_indices, idx=s_idx, n_select=self.n_support)
+            s_fall, s_rise = self.get_rise_fall(df_stock, labels_indices, idx=q_idx, n_select=self.n_support)
             s_end = np.concatenate([s_fall, s_rise])
             s_start = s_end - window_size
-            s_data, s_mask = self.generate_data(df_stock, y_start=s_start, y_end=s_end)
+            s_data, s_labels = self.generate_data(df_stock, y_start=s_start, y_end=s_end)
             
             data['support'].append(s_data)
-            # data['support_masks'].append(s_mask)
-            data['support_labels'].append(df_stock.loc[s_target, 'label'])
+            data['support_labels'].append(s_labels)  # (N*K,)
 
         for k, v in data.items():
+            v = np.array(v)
+            if k == 'support_labels':
+                v = v.reshape(-1)
             data[k] = np.array(v)
 
         return data

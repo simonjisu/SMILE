@@ -93,7 +93,8 @@ class MetaModel(nn.Module):
         self.decoder = nn.Linear(hidden_size, 2*embed_size, bias=False)
 
         # Loss
-        self.loss_fn = nn.CrossEntropyLoss()
+        # self.loss_fn = nn.CrossEntropyLoss()
+        self.loss_fn = nn.NLLLoss()
 
         # Meta Training Mode
         self.meta_train()
@@ -134,7 +135,9 @@ class MetaModel(nn.Module):
         - M: M = N * K
 
         Args:
-            inputs: (B, N, T, I). single stock data.
+            inputs: (B, N*K, T, I). single stock data.
+            - support: (B, N*K, T, I)
+            - query: (B, 1, T, I)
 
         Returns:
             encoded: (B, N*K, E)
@@ -159,29 +162,38 @@ class MetaModel(nn.Module):
         - H: hidden size
 
         Args:
-            inputs: (B, N, T, I). single stock data.
+            inputs: (B, N*K, T, I). single stock data.
+            - support: (B, N*K, T, I)
+            - query: (B, 1, T, I)
 
         Returns:
-            x: (B, E). averaged lstm encoded for each example.
+            l: (B, N*K, E).
             z: (B, N, H). sampled parameters for each class.
             kld_loss: (1,). KL-Divergence Loss between N($\mu_n^e$, $\sigma_n^e$) and N(0, 1).
             attn: (B, N, K, T). attention weights for each inputs.
         
         """
-        l, attn = self.encode_lstm(inputs, rt_attn=rt_attn)  # l: (B, N*K, E)
-        # Reshape the size
-        B = l.size(0)
-        N = self.output_size
-        K = l.size(1) // N
-        if rt_attn:
-            attn = attn.view(B, N, K, -1)  # attn: (B, N, K, T)
-        l_reshape = l.view(B, N, K, -1)  # l_reshape: (B, N, K, E)
-        # Encoder-to-z
-        e = self.encoder(l_reshape)  # e: (B, N, K, H)
-        hs = self.relation_net(e)  # hs: (B, N, 2H)
-        z, kld_loss = self.sample(hs, size=self.hidden_size)  # z: (B, N, H)
-        x = l.mean(1)  # x: (B, E)
-        return x, z, kld_loss, attn
+        # support l: (B, N*K, E), attn: (B, N*K, T)
+        # query l: (B, 1, E), attn: (B, 1, T)
+        l, attn = self.encode_lstm(inputs, rt_attn=rt_attn)  
+        B, M, _ = l.size()
+        if M > 1:
+            # Reshape the size
+            N = self.output_size  # number of classes
+            K = M // N
+            # forward support
+            if rt_attn:
+                attn = attn.view(B, N, K, -1)  # attn: (B, N, K, T)
+            l_reshape = l.view(B, N, K, -1)  # l_reshape: (B, N, K, E)
+            # Encoder-to-z
+            e = self.encoder(l_reshape)  # e: (B, N, K, H)
+            hs = self.relation_net(e)  # hs: (B, N, 2H)
+            z, kld_loss = self.sample(hs, size=self.hidden_size)  # z: (B, N, H)
+            return l, z, kld_loss, attn
+        else:
+            # forward query
+            return l, None, None, attn
+
 
     def cal_kl_div(self, dist: torch.distributions.Normal, z: torch.Tensor):
         normal = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
@@ -215,13 +227,21 @@ class MetaModel(nn.Module):
         parameters, _ = self.sample(param_hs, size=self.embed_size)  # (B, N, E)
         return parameters
 
-    def predict(self, x: torch.Tensor, parameters: torch.Tensor, labels: torch.Tensor):
+    def predict(self, l: torch.Tensor, parameters: torch.Tensor, labels: torch.Tensor):
+        """
+        l: (B, N*K, E) for support, (B, 1, E) for query
+        parameters: (B, N, E)
+        """
+        N = parameters.size(1)
         theta = parameters.permute((0, 2, 1))  # (B, N, E) -> (B, E, N)
-        scores = x.unsqueeze(1).bmm(theta).squeeze(1)  # (B, 1, E) x (B, E, N) = (B, N)
-        loss = self.loss_fn(scores, labels)
+        # support: (B, N*K, E) x (B, E, N) = (B, N*K, N) -> (B*N*K, N)
+        # query: (B, 1, E) x (B, E, N) = (B, 1, N) -> (B, N)
+        scores = l.bmm(theta).squeeze(1).view(-1, N)
+        probs = torch.log_softmax(scores, -1)  # (B, N)
+        loss = self.loss_fn(probs, labels)
         return loss, scores
 
-    def forward_decoder(self, z: torch.Tensor, x: torch.Tensor, labels: torch.Tensor):
+    def forward_decoder(self, z: torch.Tensor, l: torch.Tensor, labels: torch.Tensor):
         """Decoder
         - B: number of samples
         - N: number of classes=`output_size`
@@ -229,7 +249,7 @@ class MetaModel(nn.Module):
         - H: hidden size
 
         Args:
-            x: (B, E). averaged lstm encoded for each example.
+            l: (B, N*K, E) for support, (B, 1, E) for query
             z: (B, N, H). sampled parameters for each class.
 
         Returns:
@@ -238,7 +258,7 @@ class MetaModel(nn.Module):
             parameters: (B, N, E).
         """
         parameters = self.decode(z)  # parameters: (B, N, E)
-        loss, scores = self.predict(x, parameters, labels)
+        loss, scores = self.predict(l, parameters, labels)
         return loss, scores, parameters
 
     def inner_loop(
@@ -251,17 +271,17 @@ class MetaModel(nn.Module):
         s_labels = data['support_labels']
 
         # Forward Encoder
-        s_x, s_z, kld_loss, s_attn = self.forward_encoder(s_inputs, rt_attn=rt_attn)
+        s_l, s_z, kld_loss, s_attn = self.forward_encoder(s_inputs, rt_attn=rt_attn)
 
         # initialize z', Forward Decoder
         z_prime = s_z
-        s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
+        s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
         # inner adaptation to z
         for i in range(n_inner_step):
             z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
             z_prime = z_prime - self.inner_lr * z_prime.grad.data
-            s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, x=s_x, labels=s_labels)
+            s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
 
         # Stop Gradient: 
         # z_prime.requires_grad == False
@@ -284,7 +304,7 @@ class MetaModel(nn.Module):
                 s_loss.backward(retain_graph=True)
                 parameters = parameters - self.finetuning_lr * parameters.grad
                 s_loss, s_scores = self.predict(
-                    x=s_x, parameters=parameters, labels=s_labels
+                    l=s_l, parameters=parameters, labels=s_labels
                 )
             self.recorder.update('Finetune_Loss', s_loss)
             self.recorder.update('Finetune_Accuracy', s_scores, s_labels)
@@ -302,9 +322,9 @@ class MetaModel(nn.Module):
         q_inputs = data['query']
         q_labels = data['query_labels']
         
-        q_x, *_, q_attn = self.forward_encoder(q_inputs, rt_attn=rt_attn)
+        q_l, *_, q_attn = self.forward_encoder(q_inputs, rt_attn=rt_attn)
         q_loss, q_scores = self.predict(
-            x=q_x, parameters=parameters, labels=q_labels
+            l=q_l, parameters=parameters, labels=q_labels
         )
 
         # Record
@@ -367,10 +387,10 @@ class MetaModel(nn.Module):
         self.recorder.reset_window_metrics()
         for window_size, stock_data in tasks.items():
             # stock_data: StockDataDict
-            # - query: (n_stocks, B, N*K[n_query], T, I)
+            # - query: (n_stocks, B, 1, T, I)
             # - query_labels: (n_stocks, B)
             # - support: (n_stocks, B, N*K[n_support], T, I)
-            # - support_labels: (n_stocks, B)
+            # - support_labels: (n_stocks, B*N*K)
             stock_data.to(device)
             # Reset record: only update for a single window size with `number of stocks`
             self.recorder.reset()  

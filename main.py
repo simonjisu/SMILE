@@ -122,6 +122,6 @@ if __name__ == '__main__':
     parser.add_argument('--exp_dir', default='./experiments', type=str)
     parser.add_argument('--exp', default='', type=str)
     parser.add_argument('--meta_test', action='store_true')
-    parser.add_argument('--n_test', default=25, type=int)
+    parser.add_argument('--n_test', default=1, type=int)
     args = parser.parse_args()
     main(args)
