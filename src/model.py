@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from typing import Dict
 
-from src.dataset import StockDataDict
 from .utils import MetricRecorder
 
 class LSTM(nn.Module):
