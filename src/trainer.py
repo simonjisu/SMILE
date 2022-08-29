@@ -5,6 +5,8 @@ from collections import defaultdict
 from pathlib import Path 
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from .dataset import StockDataDict
+from typing import Dict
 
 class Trainer():
     def __init__(
@@ -72,29 +74,43 @@ class Trainer():
         state_dict = torch.load(best_ckpt)
         return int(best_step), float(train_acc), float(train_loss), state_dict
 
-    def _train(self, model, meta_dataset, optim, optim_lr):
+    def _train(
+        self, model, 
+        meta_dataset: Dict[int, StockDataDict], optim, optim_lr):
         # Meta Train
         model.meta_train()
         optim.zero_grad()
         optim_lr.zero_grad()
         train_tasks = meta_dataset.generate_tasks()
 
-        average_total_loss = model.meta_run(
-            tasks=train_tasks,
-            beta=self.beta, 
-            gamma=self.gamma, 
-            lambda2=self.lambda2, 
-            n_inner_step=self.n_inner_step, 
-            n_finetuning_step=self.n_finetuning_step, 
-            rt_attn=False,
-            device=self.device
-        )
+        model.recorder.reset_window_metrics()
+        for window_size, stock_data in train_tasks.items():
+            # stock_data: StockDataDict
+            # - query: (n_stocks, B, 1, T, I)
+            # - query_labels: (n_stocks, B)
+            # - support: (n_stocks, B, N*K[n_support], T, I)
+            # - support_labels: (n_stocks, B*N*K)
+            stock_data.to(self.device)
+            # Reset record: only update for a single window size with `number of stocks`
+            model.recorder.reset()  
+            for data in stock_data:
+                # Task specific Inner and Outer Loop
+                total_loss, *_ = model(
+                    data=data, 
+                    beta=self.beta, 
+                    gamma=self.gamma, 
+                    lambda2=self.lambda2, 
+                    n_inner_step=self.n_inner_step, 
+                    n_finetuning_step=self.n_finetuning_step, 
+                    rt_attn=False
+                )
+                total_loss.backward()
+                nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
+                nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
+                optim.step()
+                optim_lr.step()
 
-        average_total_loss.backward()
-        nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
-        nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
-        optim.step()
-        optim_lr.step()
+            model.recorder.update_window_metrics(window_size)
 
         return 
 
@@ -108,16 +124,29 @@ class Trainer():
         for val_idx in pregress:
             valid_tasks = meta_dataset.generate_tasks()
             
-            _ = model.meta_run(
-                tasks=valid_tasks,
-                beta=self.beta, 
-                gamma=self.gamma, 
-                lambda2=self.lambda2, 
-                n_inner_step=self.n_inner_step, 
-                n_finetuning_step=self.n_finetuning_step, 
-                rt_attn=False,
-                device=self.device
-            )
+            model.recorder.reset_window_metrics()
+            for window_size, stock_data in valid_tasks.items():
+                # stock_data: StockDataDict
+                # - query: (n_stocks, B, 1, T, I)
+                # - query_labels: (n_stocks, B)
+                # - support: (n_stocks, B, N*K[n_support], T, I)
+                # - support_labels: (n_stocks, B*N*K)
+                stock_data.to(self.device)
+                # Reset record: only update for a single window size with `number of stocks`
+                model.recorder.reset()
+                for data in stock_data:
+                    # Task specific Inner and Outer Loop
+                    model(
+                        data=data, 
+                        beta=self.beta, 
+                        gamma=self.gamma, 
+                        lambda2=self.lambda2, 
+                        n_inner_step=self.n_inner_step, 
+                        n_finetuning_step=self.n_finetuning_step, 
+                        rt_attn=False
+                    )
+
+                model.recorder.update_window_metrics(window_size)
 
             logs, window_logs = self.get_logs(meta_dataset, model, prefix)
             

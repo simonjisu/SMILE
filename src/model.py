@@ -372,47 +372,47 @@ class MetaModel(nn.Module):
         
         return total_loss, q_scores, s_attn, q_attn
 
-    def meta_run(
-            self, tasks: Dict[int, StockDataDict],
-            beta: float=0.001, 
-            gamma: float=1e-9, 
-            lambda2: float=0.1, 
-            n_inner_step: int=5, 
-            n_finetuning_step: int=5, 
-            rt_attn: bool=False,
-            device: torch.device=torch.device('cpu')
-        ):
-        # Outer Loop
-        all_total_loss = 0.
-        self.recorder.reset_window_metrics()
-        for window_size, stock_data in tasks.items():
-            # stock_data: StockDataDict
-            # - query: (n_stocks, B, 1, T, I)
-            # - query_labels: (n_stocks, B)
-            # - support: (n_stocks, B, N*K[n_support], T, I)
-            # - support_labels: (n_stocks, B*N*K)
-            stock_data.to(device)
-            # Reset record: only update for a single window size with `number of stocks`
-            self.recorder.reset()  
-            for data in stock_data:
-                # Inner Loop
-                total_loss, *_ = self(
-                    data=data, 
-                    beta=beta, 
-                    gamma=gamma, 
-                    lambda2=lambda2, 
-                    n_inner_step=n_inner_step, 
-                    n_finetuning_step=n_finetuning_step, 
-                    rt_attn=rt_attn
-                )
-                all_total_loss += total_loss
+    # def meta_run(
+    #         self, tasks: Dict[int, StockDataDict],
+    #         beta: float=0.001, 
+    #         gamma: float=1e-9, 
+    #         lambda2: float=0.1, 
+    #         n_inner_step: int=5, 
+    #         n_finetuning_step: int=5, 
+    #         rt_attn: bool=False,
+    #         device: torch.device=torch.device('cpu')
+    #     ):
+    #     # Outer Loop
+    #     all_total_loss = 0.
+    #     self.recorder.reset_window_metrics()
+    #     for window_size, stock_data in tasks.items():
+    #         # stock_data: StockDataDict
+    #         # - query: (n_stocks, B, 1, T, I)
+    #         # - query_labels: (n_stocks, B)
+    #         # - support: (n_stocks, B, N*K[n_support], T, I)
+    #         # - support_labels: (n_stocks, B*N*K)
+    #         stock_data.to(device)
+    #         # Reset record: only update for a single window size with `number of stocks`
+    #         self.recorder.reset()  
+    #         for data in stock_data:
+    #             # Inner Loop
+    #             total_loss, *_ = self(
+    #                 data=data, 
+    #                 beta=beta, 
+    #                 gamma=gamma, 
+    #                 lambda2=lambda2, 
+    #                 n_inner_step=n_inner_step, 
+    #                 n_finetuning_step=n_finetuning_step, 
+    #                 rt_attn=rt_attn
+    #             )
+    #             all_total_loss += total_loss
 
-            # Update record for window size 
-            self.recorder.update_window_metrics(window_size)
+    #         # Update record for window size 
+    #         self.recorder.update_window_metrics(window_size)
 
-        # TODO: calculate average performance of 4 tasks?
-        average_total_loss = all_total_loss / len(tasks)
-        return average_total_loss
+    #     # TODO: calculate average performance of 4 tasks?
+    #     average_total_loss = all_total_loss / len(tasks)
+    #     return average_total_loss
 
     def meta_predict(self):
         raise NotImplementedError('TODO')
