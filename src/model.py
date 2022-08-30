@@ -222,7 +222,7 @@ class MetaModel(nn.Module):
         Returns:
             parameters: (B, N, E). $\theta$
         """
-        param_hs = self.decoder(z)  # param_hs: (B, N, 2H)
+        param_hs = self.decoder(z)  # param_hs: (B, N, 2E)
         parameters, _ = self.sample(param_hs, size=self.embed_size)  # (B, N, E)
         return parameters
 
