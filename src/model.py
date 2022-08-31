@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import Dict
-
 from .utils import MetricRecorder
 
 class LSTM(nn.Module):
@@ -198,12 +198,14 @@ class MetaModel(nn.Module):
         normal = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
         return torch.mean(dist.log_prob(z) - normal.log_prob(z))
 
-    def sample(self, distribution_params: torch.Tensor, size: int):
+    def sample(self, distribution_params: torch.Tensor, size: int, std_offset: float=0.0):
         """parameters of a probability distribution in a low-dimensional space `z` for each class"""
         mean, log_std = torch.split(distribution_params, split_size_or_sections=size, dim=-1)
         if not self.is_meta_train:
             return mean, torch.zeros((1,)).to(mean.device)
         std = torch.exp(log_std)
+        std -= (1. - std_offset)
+        std = torch.maximum(std, torch.FloatTensor([1e-10], device=std.device))
         dist = torch.distributions.Normal(mean, std)
         z = dist.rsample()
         kld_loss = self.cal_kl_div(dist, z)
@@ -223,6 +225,9 @@ class MetaModel(nn.Module):
             parameters: (B, N, E). $\theta$
         """
         param_hs = self.decoder(z)  # param_hs: (B, N, 2H)
+        fan_in = self.embed_size  # 
+        fan_out = self.output_size  # N
+        std_offset = np.sqrt(2. / (fan_out + fan_in))
         parameters, _ = self.sample(param_hs, size=self.embed_size)  # (B, N, E)
         return parameters
 
