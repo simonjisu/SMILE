@@ -225,10 +225,10 @@ class MetaModel(nn.Module):
             parameters: (B, N, E). $\theta$
         """
         param_hs = self.decoder(z)  # param_hs: (B, N, 2H)
-        fan_in = self.embed_size  # 
+        fan_in = self.embed_size  # E
         fan_out = self.output_size  # N
         std_offset = np.sqrt(2. / (fan_out + fan_in))
-        parameters, _ = self.sample(param_hs, size=self.embed_size)  # (B, N, E)
+        parameters, _ = self.sample(param_hs, size=self.embed_size, std_offset=std_offset)  # (B, N, E)
         return parameters
 
     def predict(self, l: torch.Tensor, parameters: torch.Tensor, labels: torch.Tensor):
