@@ -204,8 +204,8 @@ class MetaModel(nn.Module):
         if not self.is_meta_train:
             return mean, torch.zeros((1,)).to(mean.device)
         std = torch.exp(log_std)
-        std -= (1. - std_offset)
-        std = torch.maximum(std, torch.FloatTensor([1e-10], device=std.device))
+        std = std - (1. - std_offset)
+        std = torch.maximum(std, torch.tensor([1e-10]).to(std.device))
         dist = torch.distributions.Normal(mean, std)
         z = dist.rsample()
         kld_loss = self.cal_kl_div(dist, z)
