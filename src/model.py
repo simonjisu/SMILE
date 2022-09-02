@@ -105,7 +105,7 @@ class MetaModel(nn.Module):
         self._meta_mode_change(True)
         self.train()
 
-    def meta_valid(self):
+    def meta_eval(self):
         self._meta_mode_change(False)
         self.manual_model_eval()
 

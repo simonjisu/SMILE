@@ -1,3 +1,4 @@
+import torch
 import argparse
 from pathlib import Path
 
@@ -28,8 +29,18 @@ def main(args):
 
         # meta train
         trainer.init_experiments(exp_num=None, record_tensorboard=True)
-        trainer.meta_train(model, meta_dataset=meta_train)
         meta_args.save(trainer.exp_dir / 'settings.yml')
+        trainer.meta_train(model, meta_dataset=meta_train)
+        
+        if trainer_kwargs['every_valid_step'] == 0:
+            best_eval_acc = 0.0
+            for model_path in sorted(trainer.ckpt_step_train_path.glob('*.ckpt')):
+                ref_step = int(str(model_path.name).split('-')[0])
+                cur_eval_loss, cur_eval_acc = trainer.meta_valid(model, meta_dataset=meta_train, total_steps=trainer.total_steps, ref_step=ref_step)
+                if cur_eval_acc > best_eval_acc:
+                    best_eval_acc = cur_eval_acc 
+                    torch.save(model.state_dict(), 
+                        str(trainer.ckpt_step_valid_path / f'{ref_step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
         # meta test 
         print('=='*10)

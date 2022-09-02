@@ -57,19 +57,20 @@ class Trainer():
         if record_tensorboard:
             self.writer = SummaryWriter(str(self.exp_dir))
         self.ckpt_path = self.exp_dir / 'checkpoints'
-        self.ckpt_step_path = self.ckpt_path / 'step'
-        if not self.ckpt_path.exists():
-            self.ckpt_path.mkdir()
-        if not self.ckpt_step_path.exists():
-            self.ckpt_step_path.mkdir()
+        self.ckpt_step_train_path =  self.ckpt_path / 'step' / 'train'
+        self.ckpt_step_valid_path =  self.ckpt_path / 'step' / 'valid'
+        for p in [self.ckpt_path, self.ckpt_step_train_path, self.ckpt_step_valid_path]:
+            if not p.exists():
+                p.mkdir(parents=True)
 
     def get_best_results(self, exp_num, record_tensorboard: bool=True):
         self.init_experiments(exp_num=exp_num, record_tensorboard=record_tensorboard)
         best_ckpt = sorted(
-            (self.ckpt_step_path).glob('*.ckpt'),
+            (self.ckpt_step_valid_path).glob('*.ckpt'),
             key=lambda x: x.name.split('-')[1], 
             reverse=True
         )[0]
+        
         best_step, train_acc, train_loss = best_ckpt.name.rstrip('.ckpt').split('-')
         state_dict = torch.load(best_ckpt)
         return int(best_step), float(train_acc), float(train_loss), state_dict
@@ -116,7 +117,7 @@ class Trainer():
 
     def _valid(self, model, meta_dataset, n_valid: int, prefix: str):
         # turn-off dropout and sample by mean
-        model.meta_valid()
+        model.meta_eval()
         valid_logs = defaultdict(list)
         valid_win_logs = defaultdict(list)
 
@@ -184,26 +185,39 @@ class Trainer():
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 prefix = 'Train'
                 train_logs, train_win_logs = self.get_logs(meta_dataset, model, prefix)
-                self.log_results(train_logs, train_win_logs, prefix, step=step, print_log=print_log)
-
+                cur_eval_loss = train_logs[f'{prefix}-Query_Loss']
+                cur_eval_acc = train_logs[f'{prefix}-Query_Accuracy']
+                self.log_results(train_logs, train_win_logs, prefix, step=step, total_steps=self.total_steps, print_log=print_log)
+                torch.save(model.state_dict(), str(self.ckpt_step_train_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+                
             # Meta Valid
-            if (step % self.every_valid_step == 0) or (step == self.total_steps-1):
-                prefix = 'Valid'
-                valid_logs, valid_win_logs = self._valid(
-                    model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step, prefix=prefix
-                )
-                self.log_results(valid_logs, valid_win_logs, prefix, step=step, print_log=print_log)
-                
-                # model save best        
-                cur_eval_loss = valid_logs[f'{prefix}-Query_Loss'][0]
-                cur_eval_acc = valid_logs[f'{prefix}-Query_Accuracy'][0]
-                
-                # save by every step 
-                torch.save(model.state_dict(), str(self.ckpt_step_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
-                # save best
-                if cur_eval_acc > best_eval_acc:
-                    best_eval_acc = cur_eval_acc 
-                    torch.save(model.state_dict(), str(self.ckpt_path / f'best_model.ckpt'))
+            if (self.every_valid_step != 0):
+                if (step % self.every_valid_step == 0) or (step == self.total_steps-1):
+                    ref_step = step
+                    cur_eval_loss, cur_eval_acc = self.meta_valid(
+                        model, meta_dataset, 
+                        total_steps=self.total_steps, 
+                        ref_step=ref_step, 
+                        print_log=print_log
+                    )
+                    
+                    # save best
+                    if (cur_eval_acc > best_eval_acc):
+                        best_eval_acc = cur_eval_acc 
+                        torch.save(model.state_dict(), str(self.ckpt_step_valid_path / f'{ref_step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+
+
+    def meta_valid(self, model, meta_dataset, total_steps:int=0, ref_step: int=0, print_log: bool=True):
+        model = model.to(self.device)
+        prefix = 'Valid'
+        valid_logs, valid_win_logs = self._valid(
+            model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step, prefix=prefix
+        )
+        self.log_results(valid_logs, valid_win_logs, prefix, step=ref_step, total_steps=total_steps, print_log=print_log)
+        # model save best        
+        cur_eval_acc = valid_logs[f'{prefix}-Query_Accuracy'][0]
+        cur_eval_loss = valid_logs[f'{prefix}-Query_Loss'][0]
+        return cur_eval_loss, cur_eval_acc
 
     def meta_test(self, model, meta_dataset, n_test: int=100, print_log: bool=True):
         # load model
@@ -213,7 +227,7 @@ class Trainer():
         test_logs, test_win_logs = self._valid(
             model=model, meta_dataset=meta_dataset, n_valid=n_test, prefix=prefix
         )
-        self.log_results(test_logs, test_win_logs, prefix, step=0, print_log=print_log)
+        self.log_results(test_logs, test_win_logs, prefix, step=0, total_steps=0, print_log=print_log)
         
         test_acc_loss = model.recorder.extract_query_loss_acc(test_logs)
         test_win_acc_loss = model.recorder.extract_query_loss_acc(test_win_logs)
@@ -228,7 +242,7 @@ class Trainer():
         logs = model.recorder.get_log_data(prefix=prefix, window_size=None)
         return logs, window_logs
 
-    def log_results(self, logs, window_logs, prefix, step, print_log=False):
+    def log_results(self, logs, window_logs, prefix, step, total_steps, print_log=False):
         # log by window
         # if prefix == 'Train': window_logs = list
         # else: window_logs = dict
@@ -269,7 +283,7 @@ class Trainer():
             z_loss = extract(prefix, 'Z_Loss', logs)
             total_loss = extract(prefix, 'Total_Loss', logs)
 
-            print(f'[Meta {prefix}]({step+1}/{self.total_steps})')
+            print(f'[Meta {prefix}]({step+1}/{total_steps})')
             print(f'  - [Support] Loss: {s_loss}, Accuracy: {s_acc}')
             print(f'  - [Query] Loss: {q_loss}, Accuracy: {q_acc}')
             print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')

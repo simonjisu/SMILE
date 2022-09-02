@@ -1,5 +1,5 @@
 data_dir: './data'
-dtype: 'kdd17'
+dtype: 'acl18'
 stock_universe: 0
 n_sample: 5
 n_lag: 1
@@ -15,13 +15,13 @@ drop_rate: 0.0
 inner_lr_init: 1
 finetuning_lr_init: 0.1
 
-exp_name: 'kdd17_u4_baseline'
+exp_name: 'acl18_u0_baseline'
 log_dir: './logging'
-total_steps: 100000
+total_steps: 3
 n_inner_step: 10
 n_finetuning_step: 0
-n_valid_step: 10
-every_valid_step: 500
+n_valid_step: 3
+every_valid_step: 0  # 0으로 하면 valid를 건너 뛰고 마지막에 한번에 valid
 beta: 0.001  
 gamma: 1.0e-8  
 lambda1: 1.0e-9  
@@ -29,4 +29,4 @@ lambda2: 0.1
 outer_lr: 1.0e-4
 clip_value: 0.1
 device: 'cuda'
-print_step: 250
+print_step: 1
