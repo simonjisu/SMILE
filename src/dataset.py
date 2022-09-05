@@ -171,7 +171,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.meta_type = meta_type
         self.window_sizes = window_sizes
         self.n_sample = n_sample
-        assert n_support % 2 == 0, '`n_support must be a even number'
         self.n_support = n_support
         self.n_lag = n_lag
         self.stock_universe = str(stock_universe)
