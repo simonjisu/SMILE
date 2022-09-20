@@ -1,7 +1,7 @@
 data_dir: '../data'
 dtype: 'kdd17'
 stock_universe: 0
-n_sample: 5
+batch_size: 5
 n_lag: 1
 n_support: 2  # number of support example in each class
 n_classes: 2

@@ -82,36 +82,34 @@ class Trainer():
         model.meta_train()
         optim.zero_grad()
         optim_lr.zero_grad()
-        train_tasks = meta_dataset.generate_tasks()
+        train_tasks = meta_dataset.generate_tasks()  # StockDataDict
+        train_tasks.to(self.device)
+        # train_tasks: StockDataDict
+        # - query: (B, 1, T, I)
+        # - query_labels: (B)
+        # - support: (B, N*K[n_support], T, I)
+        # - support_labels: (B*N*K)
+        
+        #  model.recorder.reset_window_metrics()    
+        # Reset record: only update for a single window size with `number of stocks`
+        model.recorder.reset()  
+        # Task specific Inner and Outer Loop
+        total_loss, *_ = model(
+            data=train_tasks, 
+            beta=self.beta, 
+            gamma=self.gamma, 
+            lambda2=self.lambda2, 
+            n_inner_step=self.n_inner_step, 
+            n_finetuning_step=self.n_finetuning_step, 
+            rt_attn=False
+        )
+        total_loss.backward()
+        nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
+        nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
+        optim.step()
+        optim_lr.step()
 
-        model.recorder.reset_window_metrics()
-        for window_size, stock_data in train_tasks.items():
-            # stock_data: StockDataDict
-            # - query: (n_stocks, B, 1, T, I)
-            # - query_labels: (n_stocks, B)
-            # - support: (n_stocks, B, N*K[n_support], T, I)
-            # - support_labels: (n_stocks, B*N*K)
-            stock_data.to(self.device)
-            # Reset record: only update for a single window size with `number of stocks`
-            model.recorder.reset()  
-            for data in stock_data:
-                # Task specific Inner and Outer Loop
-                total_loss, *_ = model(
-                    data=data, 
-                    beta=self.beta, 
-                    gamma=self.gamma, 
-                    lambda2=self.lambda2, 
-                    n_inner_step=self.n_inner_step, 
-                    n_finetuning_step=self.n_finetuning_step, 
-                    rt_attn=False
-                )
-                total_loss.backward()
-                nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
-                nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
-                optim.step()
-                optim_lr.step()
-
-            model.recorder.update_window_metrics(window_size)
+        # model.recorder.update_window_metrics(train_tasks.window_size)
 
         return 
 
@@ -119,54 +117,48 @@ class Trainer():
         # turn-off dropout and sample by mean
         model.meta_eval()
         valid_logs = defaultdict(list)
-        valid_win_logs = defaultdict(list)
+        # valid_win_logs = defaultdict(list)
 
         pregress = tqdm(range(n_valid), total=n_valid, desc=f'Running {prefix}')
         for val_idx in pregress:
             valid_tasks = meta_dataset.generate_tasks()
-            
-            model.recorder.reset_window_metrics()
-            for window_size, stock_data in valid_tasks.items():
-                # stock_data: StockDataDict
-                # - query: (n_stocks, B, 1, T, I)
-                # - query_labels: (n_stocks, B)
-                # - support: (n_stocks, B, N*K[n_support], T, I)
-                # - support_labels: (n_stocks, B*N*K)
-                stock_data.to(self.device)
-                # Reset record: only update for a single window size with `number of stocks`
-                model.recorder.reset()
-                for data in stock_data:
-                    # Task specific Inner and Outer Loop
-                    model(
-                        data=data, 
-                        beta=self.beta, 
-                        gamma=self.gamma, 
-                        lambda2=self.lambda2, 
-                        n_inner_step=self.n_inner_step, 
-                        n_finetuning_step=self.n_finetuning_step, 
-                        rt_attn=False
-                    )
+            valid_tasks.to(self.device)
+            # model.recorder.reset_window_metrics()
+            # for window_size, stock_data in valid_tasks.items():
+                
+            # Reset record: only update for a single window size with `number of stocks`
+            model.recorder.reset()
+            # Task specific Inner and Outer Loop
+            model(
+                data=valid_tasks, 
+                beta=self.beta, 
+                gamma=self.gamma, 
+                lambda2=self.lambda2, 
+                n_inner_step=self.n_inner_step, 
+                n_finetuning_step=self.n_finetuning_step, 
+                rt_attn=False
+            )
+            logs = model.recorder.compute(prefix)
+            # model.recorder.update_window_metrics(window_size)
 
-                model.recorder.update_window_metrics(window_size)
-
-            logs, window_logs = self.get_logs(meta_dataset, model, prefix)
+            # logs, window_logs = self.get_logs(meta_dataset, model, prefix)
             
             # log by window: List[Dict[str, float]]
-            for log_string, value in window_logs.items():
-                valid_win_logs[log_string].append(value)
+            # for log_string, value in window_logs.items():
+            #     valid_win_logs[log_string].append(value)
 
             # log all windows: averaged by number of window size
             for log_string, value in logs.items():
                 valid_logs[log_string].append(value)
         pregress.close()
 
-        for k, v in valid_win_logs.items():
-            valid_win_logs[k] = (np.mean(v), np.std(v))
+        # for k, v in valid_win_logs.items():
+        #     valid_win_logs[k] = (np.mean(v), np.std(v))
 
         for k, v in valid_logs.items():
             valid_logs[k] = (np.mean(v), np.std(v))
 
-        return valid_logs, valid_win_logs
+        return valid_logs
 
     def meta_train(self, model, meta_dataset, print_log: bool=True):
         model = model.to(self.device)
@@ -184,10 +176,11 @@ class Trainer():
 
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 prefix = 'Train'
-                train_logs, train_win_logs = self.get_logs(meta_dataset, model, prefix)
+                train_logs = model.recorder.compute(prefix)
+                # train_logs, train_win_logs = self.get_logs(meta_dataset, model, prefix)
                 cur_eval_loss = train_logs[f'{prefix}-Query_Loss']
                 cur_eval_acc = train_logs[f'{prefix}-Query_Accuracy']
-                self.log_results(train_logs, train_win_logs, prefix, step=step, total_steps=self.total_steps, print_log=print_log)
+                self.log_results(train_logs, prefix, step=step, total_steps=self.total_steps, print_log=print_log)
                 torch.save(model.state_dict(), str(self.ckpt_step_train_path / f'{step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
                 
             # Meta Valid
@@ -200,20 +193,19 @@ class Trainer():
                         ref_step=ref_step, 
                         print_log=print_log
                     )
-                    
                     # save best
                     if (cur_eval_acc > best_eval_acc):
                         best_eval_acc = cur_eval_acc 
-                        torch.save(model.state_dict(), str(self.ckpt_step_valid_path / f'{ref_step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+                        torch.save(model.state_dict(), str(self.ckpt_step_valid_path / f'{ref_step:06d}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
 
     def meta_valid(self, model, meta_dataset, total_steps:int=0, ref_step: int=0, print_log: bool=True):
         model = model.to(self.device)
         prefix = 'Valid'
-        valid_logs, valid_win_logs = self._valid(
+        valid_logs = self._valid(
             model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step, prefix=prefix
         )
-        self.log_results(valid_logs, valid_win_logs, prefix, step=ref_step, total_steps=total_steps, print_log=print_log)
+        self.log_results(valid_logs, prefix, step=ref_step, total_steps=total_steps, print_log=print_log)
         # model save best        
         cur_eval_acc = valid_logs[f'{prefix}-Query_Accuracy'][0]
         cur_eval_loss = valid_logs[f'{prefix}-Query_Loss'][0]
@@ -233,26 +225,7 @@ class Trainer():
         test_win_acc_loss = model.recorder.extract_query_loss_acc(test_win_logs)
         return test_acc_loss, test_win_acc_loss
 
-    def get_logs(self, meta_dataset, model, prefix: str):
-        window_logs = {}
-        for window_size in meta_dataset.window_sizes:
-            log_data = model.recorder.get_log_data(prefix=prefix, window_size=window_size)
-            window_logs.update(log_data)
-
-        logs = model.recorder.get_log_data(prefix=prefix, window_size=None)
-        return logs, window_logs
-
-    def log_results(self, logs, window_logs, prefix, step, total_steps, print_log=False):
-        # log by window
-        # if prefix == 'Train': window_logs = list
-        # else: window_logs = dict
-        for log_string, value in window_logs.items():
-            if prefix != 'Train':
-                # tuple for (mean, std) at Valid, Test mode
-                value = value[0]
-            self.writer.add_scalar(log_string, value, step)
-
-        # log all windows: averaged by number of window size
+    def log_results(self, logs, prefix, step, total_steps, print_log=False):
         for log_string, value in logs.items():
             if prefix != 'Train':
                 # tuple for (mean, std) at Valid, Test mode

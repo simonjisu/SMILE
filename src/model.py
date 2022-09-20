@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 from typing import Dict
 from .utils import MetricRecorder
+from .dataset import StockDataDict
 
 class LSTM(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, num_layers: int):
@@ -360,7 +361,7 @@ class MetaModel(nn.Module):
         return orthogonality_loss
 
     def forward(
-            self, data: Dict[str, torch.Tensor], 
+            self, data: StockDataDict, # Dict[str, torch.Tensor], 
             beta: float=0.001, 
             gamma: float=1e-9, 
             lambda2: float=0.1, 

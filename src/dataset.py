@@ -75,20 +75,23 @@ class StockDataDict(dict):
     def __repr__(self):
         return self.__str__()
 
-    def get_single_stock_instance(self, idx):
-        instance = {}
-        for key, value in self.items():
-            instance[key] = value[idx]
-        return instance
+    def get_data(self):
+        return dict(self.items())
+
+    # def get_single_stock_instance(self, idx):
+    #     instance = {}
+    #     for key, value in self.items():
+    #         instance[key] = value[idx]
+    #     return instance
 
     def __len__(self):
         return self.n_stocks
 
-    def __iter__(self):
-        idxes = np.arange(len(self))
-        np.random.shuffle(idxes)
-        for idx in idxes:
-            yield self.get_single_stock_instance(idx)
+    # def __iter__(self):
+    #     idxes = np.arange(len(self))
+    #     np.random.shuffle(idxes)
+    #     for idx in idxes:
+    #         yield self.get_single_stock_instance(idx)
 
 
 class MetaStockDataset(torch.utils.data.Dataset):
@@ -98,7 +101,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             data_dir: Path | str ='', 
             dtype: str ='kdd17', 
             stock_universe: int =0, 
-            n_sample: int =5,
+            batch_size: int =64,
             n_support: int =4, 
             n_lag: int =1,
             n_classes: int =2,
@@ -129,7 +132,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             data_dir (Path | str, optional): _description_. Defaults to ''.
             dtype (str, optional): _description_. Defaults to 'kdd17'.
             stock_universe (int, optional): _description_. Defaults to 0.
-            n_sample (int, optional): Number of sample to train. Defaults to 5.
+            batch_size (int, optional): Batch size. Number of stock x Number of timestamp that is aviable for each window size. Defaults to 64.
             n_support (int, optional): Number of support. Defaults to 4.
             n_classes (int, optional): _description_. Defaults to 2.
         """
@@ -170,7 +173,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         
         self.meta_type = meta_type
         self.window_sizes = window_sizes
-        self.n_sample = n_sample
+        self.batch_size = batch_size
         self.n_support = n_support
         self.n_lag = n_lag
         self.stock_universe = str(stock_universe)
@@ -260,27 +263,33 @@ class MetaStockDataset(torch.utils.data.Dataset):
 
     # Meta Generator
     def generate_tasks(self):
-        all_tasks = defaultdict()
-        for window_size in self.window_sizes:
-            tasks = self.generate_tasks_per_window_size(window_size)
-            all_tasks[window_size] = StockDataDict(tasks, window_size=window_size)
-        return all_tasks
-
-    def generate_tasks_per_window_size(self, window_size: int):
         """
-        Args:
-            window_size (int): window size
-
-        Returns:
-            tasks: Dict[str, List[np.ndarray]]
-        """
+        Data: n_classes=2. It chooses the data by latest rise & fall 
+            in `t_start`:`t_end-1`, to guess `t_end` step
+        - Query: (batch_size, 1, T, I)
+        - Support: (batch_size, n_support*n_classes, T, I)
         
-        tasks = defaultdict(list)
-        for symbol in self.symbols:
+        Labels: both with `t_e` data as label
+        - Query Labels: (batch_size,)
+        - Support Labels: (batch_size,) 
+        """
+        all_tasks = dict(
+            query = [],
+            query_labels = [],
+            support = [],
+            support_labels = [],
+        )
+        window_size = np.random.choice(self.window_sizes)  # window_sizes: list
+        for i in range(self.batch_size):
+            symbol = np.random.choice(self.symbols)
             data = self.generate_task_per_window_size_and_single_stock(symbol, window_size)
             for k, v in data.items():
-                tasks[k].append(v)
-        return tasks
+                if 'labels' in k:
+                    all_tasks[k].extend(v.tolist())
+                else:
+                    all_tasks[k].append(v)
+            
+        return StockDataDict(all_tasks, window_size=window_size)
 
     def check_condition(self, array):
         cond1 = array.sum() >= self.n_classes
@@ -294,14 +303,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         For each single stock and single window size `T`, 
         first, choose target data in `t_start`:`t_end-1`
         
-        Data: n_classes=2. It chooses the data by latest rise & fall 
-            in `t_start`:`t_end-1`, to guess `t_end` step
-        - Query: (n_sample, 1, T, I)
-        - Support: (n_sample, n_support*n_classes, T, I)
         
-        Labels: both with `t_e` data as label
-        - Query Labels: (n_sample,)
-        - Support Labels: (n_sample,) 
 
         Args:
             symbol (str): stock symbol
@@ -325,37 +327,31 @@ class MetaStockDataset(torch.utils.data.Dataset):
         candidates = labels_indices[(i+1):]  # query candidates
 
         data = dict(
-            query = [],
-            query_labels = [],
-            support = [],
-            support_labels = [],
+            query = None,
+            query_labels = None,
+            support = None,
+            support_labels = None,
         )
 
-        y_q = np.random.choice(candidates, size=(self.n_sample,), replace=False)   # index in the dataframe
-        for q_target in y_q:
+        q_target = np.random.choice(candidates)   # index in the dataframe
+        # for q_target in y_q:
             # Queries
-            q_idx = np.arange(len(labels_indices))[labels_indices == q_target][0]  # get the index of label data
-            q_end = np.array([q_target]) 
-            q_start = q_end - window_size
-            q_data, q_labels = self.generate_data(df_stock, y_start=q_start, y_end=q_end)
-            
-            data['query'].append(q_data)
-            data['query_labels'].append(q_labels[0])  # (1,)
+        q_idx = np.arange(len(labels_indices))[labels_indices == q_target][0]  # get the index of label data
+        q_end = np.array([q_target]) 
+        q_start = q_end - window_size
+        q_data, q_labels = self.generate_data(df_stock, y_start=q_start, y_end=q_end)
+        
+        data['query'] = q_data
+        data['query_labels'] = q_labels  # np.array: (1,)
 
-            # Supports
-            s_fall, s_rise = self.get_rise_fall(df_stock, labels_indices, idx=q_idx, n_select=self.n_support)
-            s_end = np.concatenate([s_fall, s_rise])
-            s_start = s_end - window_size
-            s_data, s_labels = self.generate_data(df_stock, y_start=s_start, y_end=s_end)
-            
-            data['support'].append(s_data)
-            data['support_labels'].append(s_labels)  # (N*K,)
-
-        for k, v in data.items():
-            v = np.array(v)
-            if k == 'support_labels':
-                v = v.reshape(-1)
-            data[k] = np.array(v)
+        # Supports
+        s_fall, s_rise = self.get_rise_fall(df_stock, labels_indices, idx=q_idx, n_select=self.n_support)
+        s_end = np.concatenate([s_fall, s_rise])
+        s_start = s_end - window_size
+        s_data, s_labels = self.generate_data(df_stock, y_start=s_start, y_end=s_end)
+        
+        data['support'] = s_data
+        data['support_labels'] = s_labels  # np.array: (N*K)
 
         return data
 

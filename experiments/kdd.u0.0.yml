@@ -1,7 +1,7 @@
 data_dir: './data'
 dtype: 'kdd17'
 stock_universe: 0
-n_sample: 5
+batch_size: 64
 n_lag: 1
 n_support: 2
 n_classes: 2
@@ -21,7 +21,7 @@ total_steps: 100000
 n_inner_step: 10
 n_finetuning_step: 0
 n_valid_step: 10
-every_valid_step: 500
+every_valid_step: 500  # 0 for valid after all training
 beta: 0.001  
 gamma: 1.0e-8  
 lambda1: 1.0e-9  

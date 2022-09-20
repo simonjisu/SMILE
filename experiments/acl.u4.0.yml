@@ -1,7 +1,7 @@
 data_dir: './data'
 dtype: 'acl18'
 stock_universe: 0
-n_sample: 5
+batch_size: 64
 n_lag: 1
 n_support: 2
 n_classes: 2
