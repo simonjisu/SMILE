@@ -55,7 +55,7 @@ def main(args):
         meta_test2 = MetaStockDataset(meta_type='test2', **data_kwargs)
         meta_test3 = MetaStockDataset(meta_type='test3', **data_kwargs)
         for meta_test in [meta_test1, meta_test2, meta_test3]:
-            test_acc_loss, _ = trainer.meta_test(
+            test_acc_loss = trainer.meta_test(
                 model=model, 
                 meta_dataset=meta_test, 
                 n_test=args.n_test
@@ -67,13 +67,25 @@ def main(args):
             
     else:
         record_file = open(f'./all_results.csv', 'w', encoding='utf-8')
-        record_file_win = open(f'./all_results_win.csv', 'w', encoding='utf-8')
+        # record_file_win = open(f'./all_results_win.csv', 'w', encoding='utf-8')
         print('Experiment,TestType,TestLoss,TestLossStd,TestAccuracy,TestAccuracyStd,TrainAccuracy,TrainLoss', file=record_file) 
-        print('Experiment,TestType,WindowSize,TestLoss,TestLossStd,TestAccuracy,TestAccuracyStd,TrainAccuracy,TrainLoss', file=record_file_win) 
+        # print('Experiment,TestType,WindowSize,TestLoss,TestLossStd,TestAccuracy,TestAccuracyStd,TrainAccuracy,TrainLoss', file=record_file_win) 
         
-        all_exps = [p for p in Path('./logging').glob('*') if p.is_dir()]
-        for exp in all_exps:
-            print(f'Processing: {exp.name}')
+        all_exps = {}
+        for p in Path('./logging').glob('*'):
+            if p.is_dir():
+                e_name = '_'.join(p.name.split('_')[:-1])
+                e_num = int(p.name.split('_')[-1])
+                if all_exps.get(e_name) is None:
+                    all_exps[e_name] = (p, e_num)
+                else:
+                    all_exps[e_name] = (p, max(e_num, all_exps[e_name][1]))
+
+        all_exps = list(all_exps.values())
+
+        for exp, exp_num in all_exps:
+            ename = '_'.join(exp.name.split("_")[:-1])
+            print(f'Processing: {ename}')
             setting_file = exp / 'settings.yml'
         
             meta_args = ARGProcessor(setting_file=setting_file)
@@ -88,22 +100,16 @@ def main(args):
             trainer_kwargs = meta_args.get_args(cls=Trainer)
             trainer = Trainer(**trainer_kwargs)
             
-            exp_num = sorted(
-                map(lambda x: int(x.name.split('_')[-1]), 
-                trainer.log_dir.glob(f'{trainer.exp_name}_*'))
-            )[-1]
-            ename = f'{trainer.exp_name}_{exp_num}'
-            print(f'===== {ename} =====')
             best_step, train_acc, train_loss, state_dict = trainer.get_best_results(
                 exp_num=exp_num, record_tensorboard=False)  # get best results and state dict
             
             model = MetaModel(**model_kwargs)
             model.load_state_dict(state_dict=state_dict)
 
-            print(f'[Meta Train Query Result] Best Step: {best_step} | Accuracy: {train_acc:.4f} | Loss: {train_loss:.4f}')
+            print(f'[Meta Valid Query Result] Best Step: {best_step} | Accuracy: {train_acc:.4f} | Loss: {train_loss:.4f}')
 
             for meta_test in [meta_test1, meta_test2, meta_test3]:
-                test_acc_loss, test_win_acc_loss = trainer.meta_test(
+                test_acc_loss = trainer.meta_test(
                     model=model, 
                     meta_dataset=meta_test, 
                     n_test=args.n_test
@@ -117,14 +123,14 @@ def main(args):
                     f'{ename},{prefix},{test_loss:.4f},{test_loss_std:.4f},{test_acc:.4f},{test_acc_std:.4f},{train_acc:.4f},{train_loss:.4f}', 
                     file=record_file
                 )
-                for win_size in meta_test.window_sizes:
-                    # 'Experiment,TestType,WindowSize,TestLoss,TestLossStd,TestAccuracy,TestAccuracyStd,TrainAccuracy,TrainLoss'
-                    test_acc, test_acc_std = test_win_acc_loss[f'{prefix}-WinSize={win_size}-Query_Accuracy']
-                    test_loss, test_loss_std = test_win_acc_loss[f'{prefix}-WinSize={win_size}-Query_Loss']
-                    print(
-                        f'{ename},{prefix},{win_size},{test_loss:.4f},{test_loss_std:.4f},{test_acc:.4f},{test_acc_std:.4f},{train_acc:.4f},{train_loss:.4f}', 
-                        file=record_file_win
-                    )
+                # for win_size in meta_test.window_sizes:
+                #     # 'Experiment,TestType,WindowSize,TestLoss,TestLossStd,TestAccuracy,TestAccuracyStd,TrainAccuracy,TrainLoss'
+                #     test_acc, test_acc_std = test_win_acc_loss[f'{prefix}-WinSize={win_size}-Query_Accuracy']
+                #     test_loss, test_loss_std = test_win_acc_loss[f'{prefix}-WinSize={win_size}-Query_Loss']
+                #     print(
+                #         f'{ename},{prefix},{win_size},{test_loss:.4f},{test_loss_std:.4f},{test_acc:.4f},{test_acc_std:.4f},{train_acc:.4f},{train_loss:.4f}', 
+                #         file=record_file_win
+                #     )
         
         record_file.close()
 

@@ -56,6 +56,8 @@ class Trainer():
         self.exp_dir = self.log_dir / f'{self.exp_name}_{self.exp_num}'
         if record_tensorboard:
             self.writer = SummaryWriter(str(self.exp_dir))
+        else:
+            self.writer = None
         self.ckpt_path = self.exp_dir / 'checkpoints'
         self.ckpt_step_train_path =  self.ckpt_path / 'step' / 'train'
         self.ckpt_step_valid_path =  self.ckpt_path / 'step' / 'valid'
@@ -216,21 +218,21 @@ class Trainer():
         model = model.to(self.device)
         # test
         prefix = meta_dataset.meta_type.capitalize()
-        test_logs, test_win_logs = self._valid(
+        test_logs = self._valid(
             model=model, meta_dataset=meta_dataset, n_valid=n_test, prefix=prefix
         )
-        self.log_results(test_logs, test_win_logs, prefix, step=0, total_steps=0, print_log=print_log)
+        self.log_results(test_logs, prefix, step=0, total_steps=0, print_log=print_log)
         
         test_acc_loss = model.recorder.extract_query_loss_acc(test_logs)
-        test_win_acc_loss = model.recorder.extract_query_loss_acc(test_win_logs)
-        return test_acc_loss, test_win_acc_loss
+        return test_acc_loss
 
     def log_results(self, logs, prefix, step, total_steps, print_log=False):
         for log_string, value in logs.items():
             if prefix != 'Train':
                 # tuple for (mean, std) at Valid, Test mode
                 value = value[0]
-            self.writer.add_scalar(log_string, value, step)
+            if self.writer is not None:
+                self.writer.add_scalar(log_string, value, step)
 
         if print_log:
             def extract(prefix, key, logs):
