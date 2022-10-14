@@ -1,4 +1,4 @@
-import torch
+import numpy as np
 import argparse
 from pathlib import Path
 
@@ -21,6 +21,10 @@ def main(args):
         data_kwargs = meta_args.get_args(cls=MetaStockDataset)
 
         meta_train = MetaStockDataset(meta_type='train', **data_kwargs)
+        meta_valid_time = MetaStockDataset(meta_type='valid-time', **data_kwargs)
+        meta_valid_stock = MetaStockDataset(meta_type='valid-stock', **data_kwargs)
+        meta_valid_mix = MetaStockDataset(meta_type='valid-mix', **data_kwargs)
+
         model_kwargs = meta_args.get_args(cls=MetaModel)
         model = MetaModel(**model_kwargs)
 
@@ -30,17 +34,26 @@ def main(args):
         # meta train
         trainer.init_experiments(exp_num=None, record_tensorboard=True)
         meta_args.save(trainer.exp_dir / 'settings.yml')
-        trainer.meta_train(model, meta_dataset=meta_train)
+        trainer.run_train(
+            model, 
+            meta_trainset=meta_train,
+            meta_validset_time=meta_valid_time,
+            meta_validset_stock=meta_valid_stock,
+            meta_validset_mix=meta_valid_mix, 
+            print_log=True
+        )
         
-        if trainer_kwargs['every_valid_step'] == 0:
-            best_eval_acc = 0.0
-            for model_path in sorted(trainer.ckpt_step_train_path.glob('*.ckpt')):
-                ref_step = int(str(model_path.name).split('-')[0])
-                cur_eval_loss, cur_eval_acc = trainer.meta_valid(model, meta_dataset=meta_train, total_steps=trainer.total_steps, ref_step=ref_step)
-                if cur_eval_acc > best_eval_acc:
-                    best_eval_acc = cur_eval_acc 
-                    torch.save(model.state_dict(), 
-                        str(trainer.ckpt_step_valid_path / f'{ref_step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+        # meta valid
+        
+        # if trainer_kwargs['every_valid_step'] == 0:
+        #     best_eval_acc = 0.0
+        #     for model_path in sorted(trainer.ckpt_step_train_path.glob('*.ckpt')):
+        #         ref_step = int(str(model_path.name).split('-')[0])
+        #         cur_eval_loss, cur_eval_acc = trainer.meta_valid(model, meta_dataset=meta_train, total_steps=trainer.total_steps, ref_step=ref_step)
+        #         if cur_eval_acc > best_eval_acc:
+        #             best_eval_acc = cur_eval_acc 
+        #             torch.save(model.state_dict(), 
+        #                 str(trainer.ckpt_step_valid_path / f'{ref_step}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
         # meta test 
         print('=='*10)
@@ -51,10 +64,13 @@ def main(args):
         model.load_state_dict(state_dict=state_dict)
 
         print(f'[Meta Train Query Result] Best Step: {best_step} | Accuracy: {train_acc:.4f} | Loss: {train_loss:.4f}')
-        meta_test1 = MetaStockDataset(meta_type='test1', **data_kwargs)
-        meta_test2 = MetaStockDataset(meta_type='test2', **data_kwargs)
-        meta_test3 = MetaStockDataset(meta_type='test3', **data_kwargs)
-        for meta_test in [meta_test1, meta_test2, meta_test3]:
+        meta_test_time = MetaStockDataset(meta_type='test-time', **data_kwargs)
+        meta_test_stock = MetaStockDataset(meta_type='test-stock', **data_kwargs)
+        meta_test_mix = MetaStockDataset(meta_type='test-mix', **data_kwargs)
+
+        test_accs = []
+        test_losses = []
+        for meta_test in [meta_test_time, meta_test_stock, meta_test_mix]:
             test_acc_loss = trainer.meta_test(
                 model=model, 
                 meta_dataset=meta_test, 
@@ -64,7 +80,12 @@ def main(args):
             test_acc, test_acc_std = test_acc_loss[f'{prefix}-Query_Accuracy']
             test_loss, test_loss_std = test_acc_loss[f'{prefix}-Query_Loss']
             print(f'[Meta {prefix}] Loss: {test_loss:.4f} +/- {test_loss_std:.4f} | Accuracy: {test_acc:.4f} +/- {test_acc_std:.4f}')
-            
+            test_accs.append(test_acc)
+            test_losses.append(test_loss)
+        f1 = 3/ (1/np.array(test_accs)).sum()
+        avgloss = np.array(test_losses).mean()
+        print(f'[Meta Test] F1: {f1:.4f} | AvgLoss: {avgloss:.4f}')
+
     else:
         record_file = open(f'./all_results.csv', 'w', encoding='utf-8')
         # record_file_win = open(f'./all_results_win.csv', 'w', encoding='utf-8')
@@ -139,6 +160,6 @@ if __name__ == '__main__':
     parser.add_argument('--exp_dir', default='./experiments', type=str)
     parser.add_argument('--exp', default='', type=str)
     parser.add_argument('--meta_test', action='store_true')
-    parser.add_argument('--n_test', default=1, type=int)
+    parser.add_argument('--n_test', default=10, type=int)
     args = parser.parse_args()
     main(args)

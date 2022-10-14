@@ -100,7 +100,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
             meta_type: str ='train', 
             data_dir: Path | str ='', 
             dtype: str ='kdd17', 
-            stock_universe: int =0, 
             batch_size: int =64,
             n_support: int =4, 
             n_lag: int =1,
@@ -153,7 +152,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
                 'universe': self.data_dir / 'kdd17/stock_universe.json', 
                 'start_date': '2007-01-01',
                 'train_date': '2015-01-01', 
-                'val_date': '2016-01-01', 
+                'valid_date': '2016-01-01', 
                 'test_date': '2017-01-01',
             },
             # train: (Jan-01-2014 to Aug-01-2015)
@@ -165,7 +164,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
                 'universe': self.data_dir / 'stocknet-dataset/stock_universe.json',
                 'start_date': '2014-01-01',
                 'train_date': '2015-08-01', 
-                'val_date': '2015-10-01', 
+                'valid_date': '2015-10-01', 
                 'test_date': '2016-01-01',
             }
         }
@@ -176,7 +175,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.n_support = n_support
         self.n_lag = n_lag
-        self.stock_universe = str(stock_universe)
         self.n_classes = n_classes
 
         # get data
@@ -186,29 +184,36 @@ class MetaStockDataset(torch.utils.data.Dataset):
         with ds_config['universe'].open('r') as file:
             universe_dict = json.load(file)
         
-        universe_key = 'known' if (meta_type == 'train') or (meta_type == 'test1') else 'unknown'
-        universe = universe_dict[self.stock_universe][universe_key]
+        # meta_type: train / valid1: valid-time, valid2: valid-stock, valid3: valid-mix / test1, test2, test3
+        if meta_type in ['train', 'valid-time', 'test-time']:
+            universe = universe_dict['train']
+        elif meta_type in ['valid-stock', 'valid-mix']:
+            universe = universe_dict['valid']
+        elif meta_type in ['test-stock', 'test-mix']:
+            universe = universe_dict['test']
+        else:
+            raise KeyError('Error argument `meta_type`, should be in (train, valid-time, valid-stock, valid-mix, test-time, test-stock, test-mix)')
+
+        if meta_type in ['train', 'valid-stock', 'test-stock']:
+            date1 = ds_config['start_date']
+            date2 = ds_config['train_date']
+        elif meta_type in ['valid-time', 'valid-mix']:
+            date1 = ds_config['train_date']
+            date2 = ds_config['valid_date']
+        elif meta_type in ['test-time', 'test-mix']:
+            date1 = ds_config['valid_date']
+            date2 = ds_config['test_date']
+        else:
+            raise KeyError('Error argument `meta_type`, should be in (train, valid-time, valid-stock, valid-mix, test-time, test-stock, test-mix)')
+
         iterator = [p for p in ps if p.name.strip('.csv') in universe]
         for p in tqdm(iterator, total=len(iterator), desc=f'Processing data and candidates for {self.meta_type}'):    
             stock_symbol = p.name.rstrip('.csv')
             df_single = self.load_single_stock(p)
-            if meta_type == 'train':
-                cond = df_single['date'].between(ds_config['start_date'], ds_config['train_date'])
-                df_single = df_single.loc[cond].reset_index(drop=True)
-                labels_indices = self.get_candidates(df_single)
-            else:
-                if meta_type == 'test1':
-                    df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
-                    labels_indices = self.get_candidates(df_single)
-                elif meta_type == 'test2':
-                    df_single = df_single.loc[df_single['date'] <= ds_config['train_date']].reset_index(drop=True)
-                    labels_indices = self.get_candidates(df_single)
-                elif meta_type == 'test3':
-                    df_single = df_single.loc[df_single['date'] > ds_config['val_date']].reset_index(drop=True)
-                    labels_indices = self.get_candidates(df_single)
-                else:
-                    raise KeyError('Error argument `meta_type`, should be in (train, test1, test2, test3)')
-
+            cond = df_single['date'].between(date1, date2)
+            df_single = df_single.loc[cond].reset_index(drop=True)
+            labels_indices = self.get_candidates(df_single)
+            
             self.data[stock_symbol] = df_single
             self.candidates[stock_symbol] = labels_indices
 

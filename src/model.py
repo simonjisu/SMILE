@@ -96,22 +96,21 @@ class MetaModel(nn.Module):
         # self.loss_fn = nn.CrossEntropyLoss()
         self.loss_fn = nn.NLLLoss()
 
-        # Meta Training Mode
-        self.meta_train()
+        # Meta Mode Support / Query
+        self._mode_query(False)
 
         # Recoder
         self.recorder = MetricRecorder().to(device)
 
     def meta_train(self):
-        self._meta_mode_change(True)
         self.train()
 
     def meta_eval(self):
-        self._meta_mode_change(False)
         self.manual_model_eval()
 
-    def _meta_mode_change(self, mode: bool=True):
-        self.is_meta_train = mode
+    def _mode_query(self, mode: bool=True):
+        # check if is support of query
+        self.is_query = mode
 
     def manual_model_eval(self, mode: bool=False):
         """
@@ -202,7 +201,7 @@ class MetaModel(nn.Module):
     def sample(self, distribution_params: torch.Tensor, size: int, std_offset: float=0.0):
         """parameters of a probability distribution in a low-dimensional space `z` for each class"""
         mean, log_std = torch.split(distribution_params, split_size_or_sections=size, dim=-1)
-        if not self.is_meta_train:
+        if self.is_query:
             return mean, torch.zeros((1,)).to(mean.device)
         std = torch.exp(log_std)
         std = std - (1. - std_offset)
@@ -272,6 +271,7 @@ class MetaModel(nn.Module):
             n_finetuning_step: int=5, 
             rt_attn: bool=False
         ):
+        self._mode_query(False)
         s_inputs = data['support']
         s_labels = data['support_labels']
 
@@ -319,11 +319,12 @@ class MetaModel(nn.Module):
             
         return parameters, kld_loss, z_loss, s_attn
 
-    def validate(
+    def query_validate(
             self, data: Dict[str, torch.Tensor], 
             parameters: torch.Tensor, 
             rt_attn: bool=False
         ):
+        self._mode_query(True)
         q_inputs = data['query']
         q_labels = data['query_labels']
         
@@ -372,7 +373,7 @@ class MetaModel(nn.Module):
         parameters, kld_loss, z_loss, s_attn = self.inner_loop(
             data, n_inner_step, n_finetuning_step, rt_attn
         )
-        q_loss, q_scores, q_attn = self.validate(data, parameters, rt_attn)
+        q_loss, q_scores, q_attn = self.query_validate(data, parameters, rt_attn)
         total_loss = self.cal_total_loss(q_loss, kld_loss, z_loss, beta, gamma, lambda2)
         
         return total_loss, q_scores, s_attn, q_attn

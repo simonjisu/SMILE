@@ -1,12 +1,11 @@
 data_dir: '../data'
 dtype: 'kdd17'
-stock_universe: 0
 batch_size: 5
 n_lag: 1
 n_support: 2  # number of support example in each class
 n_classes: 2
 n_query: 1
-window_sizes: [5, 10, 15, 20]
+window_sizes: [15]
 
 feature_size: 11  
 embed_size: 5

@@ -77,9 +77,13 @@ class Trainer():
         state_dict = torch.load(best_ckpt)
         return int(best_step), float(train_acc), float(train_loss), state_dict
 
-    def _train(
-        self, model, 
-        meta_dataset: Dict[int, StockDataDict], optim, optim_lr):
+    def outer_loop(
+        self, 
+        model, 
+        meta_dataset: Dict[int, StockDataDict], 
+        optim, 
+        optim_lr
+        ):
         # Meta Train
         model.meta_train()
         optim.zero_grad()
@@ -119,15 +123,12 @@ class Trainer():
         # turn-off dropout and sample by mean
         model.meta_eval()
         valid_logs = defaultdict(list)
-        # valid_win_logs = defaultdict(list)
 
         pregress = tqdm(range(n_valid), total=n_valid, desc=f'Running {prefix}')
         for val_idx in pregress:
             valid_tasks = meta_dataset.generate_tasks()
             valid_tasks.to(self.device)
-            # model.recorder.reset_window_metrics()
-            # for window_size, stock_data in valid_tasks.items():
-                
+
             # Reset record: only update for a single window size with `number of stocks`
             model.recorder.reset()
             # Task specific Inner and Outer Loop
@@ -141,28 +142,26 @@ class Trainer():
                 rt_attn=False
             )
             logs = model.recorder.compute(prefix)
-            # model.recorder.update_window_metrics(window_size)
-
-            # logs, window_logs = self.get_logs(meta_dataset, model, prefix)
             
-            # log by window: List[Dict[str, float]]
-            # for log_string, value in window_logs.items():
-            #     valid_win_logs[log_string].append(value)
-
-            # log all windows: averaged by number of window size
             for log_string, value in logs.items():
                 valid_logs[log_string].append(value)
         pregress.close()
-
-        # for k, v in valid_win_logs.items():
-        #     valid_win_logs[k] = (np.mean(v), np.std(v))
 
         for k, v in valid_logs.items():
             valid_logs[k] = (np.mean(v), np.std(v))
 
         return valid_logs
 
-    def meta_train(self, model, meta_dataset, print_log: bool=True):
+    def run_train(
+        self, 
+        model, 
+        meta_trainset,
+        meta_validset_time,
+        meta_validset_stock,
+        meta_validset_mix, 
+        print_log: bool=True
+        ):
+        
         model = model.to(self.device)
         lr_list = ['inner_lr', 'finetuning_lr']
         params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]
@@ -170,16 +169,15 @@ class Trainer():
         optim = torch.optim.Adam(params, lr=self.outer_lr, weight_decay=self.lambda1)
         optim_lr = torch.optim.Adam(lr_params, lr=self.outer_lr, weight_decay=self.lambda1)
         
-        best_eval_acc = 0.0
+        best_eval_f1 = 0.0
 
         for step in range(self.total_steps):
             # Meta Train
-            self._train(model, meta_dataset=meta_dataset, optim=optim, optim_lr=optim_lr)
+            self.outer_loop(model, meta_dataset=meta_trainset, optim=optim, optim_lr=optim_lr)
 
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 prefix = 'Train'
                 train_logs = model.recorder.compute(prefix)
-                # train_logs, train_win_logs = self.get_logs(meta_dataset, model, prefix)
                 cur_eval_loss = train_logs[f'{prefix}-Query_Loss']
                 cur_eval_acc = train_logs[f'{prefix}-Query_Accuracy']
                 self.log_results(train_logs, prefix, step=step, total_steps=self.total_steps, print_log=print_log)
@@ -189,29 +187,43 @@ class Trainer():
             if (self.every_valid_step != 0):
                 if (step % self.every_valid_step == 0) or (step == self.total_steps-1):
                     ref_step = step
-                    cur_eval_loss, cur_eval_acc = self.meta_valid(
-                        model, meta_dataset, 
-                        total_steps=self.total_steps, 
-                        ref_step=ref_step, 
-                        print_log=print_log
-                    )
+
+                    prefix = 'Valid-Time'
+                    valid_logs_time = self.run_valid(model, meta_validset_time, prefix)
+                    self.log_results(valid_logs_time, prefix, step=ref_step, total_steps=self.total_steps, print_log=print_log)
+                    cur_eval_acc_time = valid_logs_time[f'{prefix}-Query_Accuracy'][0]
+                    cur_eval_loss_time = valid_logs_time[f'{prefix}-Query_Loss'][0]
+                    
+                    prefix = 'Valid-Stock'
+                    valid_logs_stock = self.run_valid(model, meta_validset_stock, prefix)
+                    self.log_results(valid_logs_stock, prefix, step=ref_step, total_steps=self.total_steps, print_log=print_log)
+                    cur_eval_acc_stock = valid_logs_stock[f'{prefix}-Query_Accuracy'][0]
+                    cur_eval_loss_stock = valid_logs_stock[f'{prefix}-Query_Loss'][0]
+                    
+                    prefix = 'Valid-Mix'
+                    valid_logs_mix = self.run_valid(model, meta_validset_mix, prefix)
+                    self.log_results(valid_logs_mix, prefix, step=ref_step, total_steps=self.total_steps, print_log=print_log)
+                    cur_eval_acc_mix = valid_logs_mix[f'{prefix}-Query_Accuracy'][0]
+                    cur_eval_loss_mix = valid_logs_mix[f'{prefix}-Query_Loss'][0]
+
+                    prefix = 'Valid'
+                    cur_eval_f1 = 3 / ((1/cur_eval_acc_time) + (1/cur_eval_acc_stock) + (1/cur_eval_acc_mix))
+                    cur_eval_loss = (cur_eval_loss_time + cur_eval_loss_stock + cur_eval_loss_mix) / 3
+                    valid_final_log = {f'{prefix}-F1': [cur_eval_f1], f'{prefix}-AvgLoss': [cur_eval_loss]}
+                    self.log_results(valid_final_log, prefix, step=ref_step, total_steps=self.total_steps, print_log=print_log)
+
                     # save best
-                    if (cur_eval_acc > best_eval_acc):
-                        best_eval_acc = cur_eval_acc 
-                        torch.save(model.state_dict(), str(self.ckpt_step_valid_path / f'{ref_step:06d}-{cur_eval_acc:.4f}-{cur_eval_loss:.4f}.ckpt'))
+                    if (cur_eval_f1 > best_eval_f1):
+                        best_eval_f1 = cur_eval_f1 
+                        torch.save(model.state_dict(), str(self.ckpt_step_valid_path / f'{ref_step:06d}-{cur_eval_f1:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
 
-    def meta_valid(self, model, meta_dataset, total_steps:int=0, ref_step: int=0, print_log: bool=True):
+    def run_valid(self, model, meta_dataset, prefix):
         model = model.to(self.device)
-        prefix = 'Valid'
         valid_logs = self._valid(
             model=model, meta_dataset=meta_dataset, n_valid=self.n_valid_step, prefix=prefix
         )
-        self.log_results(valid_logs, prefix, step=ref_step, total_steps=total_steps, print_log=print_log)
-        # model save best        
-        cur_eval_acc = valid_logs[f'{prefix}-Query_Accuracy'][0]
-        cur_eval_loss = valid_logs[f'{prefix}-Query_Loss'][0]
-        return cur_eval_loss, cur_eval_acc
+        return valid_logs
 
     def meta_test(self, model, meta_dataset, n_test: int=100, print_log: bool=True):
         # load model
@@ -235,32 +247,45 @@ class Trainer():
                 self.writer.add_scalar(log_string, value, step)
 
         if print_log:
+            only_one_to_print = True if prefix == 'Valid' else False
+
             def extract(prefix, key, logs):
                 if prefix == 'Train':
                     mean = logs[f'{prefix}-{key}']
                     std = None
+                elif prefix == 'Valid':
+                    # F1, Loss
+                    mean = logs[f'{prefix}-{key}'][0]
+                    std = None
                 else:
+                    # prefix-***
                     mean, std = logs[f'{prefix}-{key}']
-
+                    
                 s = f'{mean:.4f}'
                 if std is not None:
                     s += f' +/- {std:.4f}'
                 return s
 
-            s_acc = extract(prefix, 'Support_Accuracy', logs)
-            s_loss = extract(prefix, 'Support_Loss', logs)
-            q_acc = extract(prefix, 'Query_Accuracy', logs)
-            q_loss = extract(prefix, 'Query_Loss', logs)
-            f_acc = extract(prefix, 'Finetune_Accuracy', logs)
-            f_loss = extract(prefix, 'Finetune_Loss', logs)
-            kld_loss = extract(prefix, 'KLD_Loss', logs)
-            oth_loss = extract(prefix, 'Orthogonality_Loss', logs)
-            z_loss = extract(prefix, 'Z_Loss', logs)
-            total_loss = extract(prefix, 'Total_Loss', logs)
-
-            print(f'[Meta {prefix}]({step+1}/{total_steps})')
-            print(f'  - [Support] Loss: {s_loss}, Accuracy: {s_acc}')
-            print(f'  - [Query] Loss: {q_loss}, Accuracy: {q_acc}')
-            print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')
-            print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
-            print()
+            if only_one_to_print:
+                f1 = extract(prefix, 'F1', logs)
+                avgloss = extract(prefix, 'AvgLoss', logs)
+                print(f'[Meta {prefix}] Result - F1: {f1}, AvgLoss: {avgloss}')
+                print()
+            else:
+                s_acc = extract(prefix, 'Support_Accuracy', logs)
+                s_loss = extract(prefix, 'Support_Loss', logs)
+                q_acc = extract(prefix, 'Query_Accuracy', logs)
+                q_loss = extract(prefix, 'Query_Loss', logs)
+                f_acc = extract(prefix, 'Finetune_Accuracy', logs)
+                f_loss = extract(prefix, 'Finetune_Loss', logs)
+                kld_loss = extract(prefix, 'KLD_Loss', logs)
+                oth_loss = extract(prefix, 'Orthogonality_Loss', logs)
+                z_loss = extract(prefix, 'Z_Loss', logs)
+                total_loss = extract(prefix, 'Total_Loss', logs)
+            
+                print(f'[Meta {prefix}]({step+1}/{total_steps})')
+                print(f'  - [Support] Loss: {s_loss}, Accuracy: {s_acc}')
+                print(f'  - [Query] Loss: {q_loss}, Accuracy: {q_acc}')
+                print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')
+                print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
+                print()

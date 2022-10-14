@@ -1,32 +1,31 @@
 data_dir: './data'
-dtype: 'kdd17'
-stock_universe: 0
+dtype: 'acl18'
 batch_size: 64
 n_lag: 1
-n_support: 2
+n_support: 3
 n_classes: 2
-window_sizes: [5, 10, 15, 20]
+window_sizes: [5]
 
 feature_size: 11  
-embed_size: 8
+embed_size: 16
 hidden_size: 16
 num_layers: 1
 drop_rate: 0.0  
 inner_lr_init: 1
 finetuning_lr_init: 0.1
 
-exp_name: 'kdd17_u4_baseline'
+exp_name: 'acl18_baseline'
 log_dir: './logging'
-total_steps: 100000
+total_steps: 80000
 n_inner_step: 10
 n_finetuning_step: 0
 n_valid_step: 10
 every_valid_step: 500
-beta: 0.001  
+beta: 0.01  
 gamma: 1.0e-8  
-lambda1: 1.0e-9  
+lambda1: 1.0e-8  
 lambda2: 0.1 
-outer_lr: 1.0e-4
+outer_lr: 1.0e-3
 clip_value: 0.1
 device: 'cuda'
-print_step: 250
+print_step: 500
