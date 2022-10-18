@@ -7,6 +7,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from .dataset import StockDataDict
 from typing import Dict
+import matplotlib.pyplot as plt
 
 class Trainer():
     def __init__(
@@ -217,6 +218,8 @@ class Trainer():
                         best_eval_f1 = cur_eval_f1 
                         torch.save(model.state_dict(), str(self.ckpt_step_valid_path / f'{ref_step:06d}-{cur_eval_f1:.4f}-{cur_eval_loss:.4f}.ckpt'))
 
+        # log for query_distribution
+        self.log_q_dist(meta_trainset, meta_validset_time, meta_validset_stock, meta_validset_mix)
 
     def run_valid(self, model, meta_dataset, prefix):
         model = model.to(self.device)
@@ -289,3 +292,21 @@ class Trainer():
                 print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')
                 print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
                 print()
+
+    def plot_q_dist(self, meta_dataset):
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+        idx = np.arange(max(meta_dataset.q_dist.keys()))
+        values = [meta_dataset.q_dist[i] if meta_dataset.q_dist.get(i) else 0 for i in idx]
+
+        ax.bar(idx, values)
+        ax.set_xlabel('Query index in labels')
+        ax.set_ylabel('Count')
+        ax.set_title(f'Meta Type: {meta_dataset.meta_type}')
+        plt.tight_layout()
+        fig.savefig(self.ckpt_path / f'q_dist_{meta_dataset.meta_type}.png')
+        return fig
+
+    def log_q_dist(self, meta_trainset, meta_validset_time, meta_validset_stock, meta_validset_mix):
+        for ds in [meta_trainset, meta_validset_time, meta_validset_stock, meta_validset_mix]:
+            fig = self.plot_q_dist(meta_dataset=ds)
+            self.writer.add_figure(f'Query Distribution: {ds.meta_type}', fig)

@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Any, Generator
 from tqdm import tqdm
-from collections import defaultdict
+from collections import Counter
 
 
 def flatten(li: List[Any]) -> Generator:
@@ -218,6 +218,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
             self.candidates[stock_symbol] = labels_indices
 
         self.n_stocks = len(universe)
+        self.reset_q_idx_dist()
 
     def load_single_stock(self, p: Path | str):
         def longterm_trend(x: pd.Series, k:int):
@@ -276,7 +277,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         
         Labels: both with `t_e` data as label
         - Query Labels: (batch_size,)
-        - Support Labels: (batch_size,) 
+        - Support Labels: (batch_size*n_support*n_classes,) 
         """
         all_tasks = dict(
             query = [],
@@ -307,8 +308,6 @@ class MetaStockDataset(torch.utils.data.Dataset):
         
         For each single stock and single window size `T`, 
         first, choose target data in `t_start`:`t_end-1`
-        
-        
 
         Args:
             symbol (str): stock symbol
@@ -342,6 +341,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         # for q_target in y_q:
             # Queries
         q_idx = np.arange(len(labels_indices))[labels_indices == q_target][0]  # get the index of label data
+        self.update_q_idx_dist(q_idx)
         q_end = np.array([q_target]) 
         q_start = q_end - window_size
         q_data, q_labels = self.generate_data(df_stock, y_start=q_start, y_end=q_end)
@@ -386,3 +386,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
         rise = df_check.index[df_check == self.labels_dict['rise']][:n_select].to_numpy()
         fall = df_check.index[df_check == self.labels_dict['fall']][:n_select].to_numpy()
         return fall, rise
+
+    def update_q_idx_dist(self, q_idx):
+        self.q_dist[q_idx] += 1
+
+    def reset_q_idx_dist(self):
+        self.q_dist = Counter()

@@ -14,6 +14,7 @@ ipykernel = "*"
 ipywidgets = "*"
 tensorboard = "*"
 torch = {version = "==1.11.0+cu113", index = "pytorch"}
+torchvision = {version = "==0.12.0+cu113", index = "pytorch"}
 pandas = "*"
 tqdm = "*"
 pyyaml = "*"
