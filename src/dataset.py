@@ -78,21 +78,8 @@ class StockDataDict(dict):
     def get_data(self):
         return dict(self.items())
 
-    # def get_single_stock_instance(self, idx):
-    #     instance = {}
-    #     for key, value in self.items():
-    #         instance[key] = value[idx]
-    #     return instance
-
     def __len__(self):
         return self.n_stocks
-
-    # def __iter__(self):
-    #     idxes = np.arange(len(self))
-    #     np.random.shuffle(idxes)
-    #     for idx in idxes:
-    #         yield self.get_single_stock_instance(idx)
-
 
 class MetaStockDataset(torch.utils.data.Dataset):
     def __init__(
@@ -341,7 +328,7 @@ class MetaStockDataset(torch.utils.data.Dataset):
         # for q_target in y_q:
             # Queries
         q_idx = np.arange(len(labels_indices))[labels_indices == q_target][0]  # get the index of label data
-        self.update_q_idx_dist(q_idx)
+        self.update_q_idx_dist(q_target)
         q_end = np.array([q_target]) 
         q_start = q_end - window_size
         q_data, q_labels = self.generate_data(df_stock, y_start=q_start, y_end=q_end)
@@ -387,8 +374,9 @@ class MetaStockDataset(torch.utils.data.Dataset):
         fall = df_check.index[df_check == self.labels_dict['fall']][:n_select].to_numpy()
         return fall, rise
 
-    def update_q_idx_dist(self, q_idx):
-        self.q_dist[q_idx] += 1
+    def update_q_idx_dist(self, q_target):
+        self.q_dist[q_target] += 1
 
     def reset_q_idx_dist(self):
         self.q_dist = Counter()
+    
