@@ -14,7 +14,7 @@ drop_rate: 0.0
 inner_lr_init: 1
 finetuning_lr_init: 0.1
 
-exp_name: 'kdd17_baseline'
+exp_name: 'kdd17_0'
 log_dir: './logging'
 total_steps: 70000
 n_inner_step: 10
