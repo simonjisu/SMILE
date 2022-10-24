@@ -243,7 +243,7 @@ class MetaModel(nn.Module):
         scores = l.bmm(theta).squeeze(1).view(-1, N)
         probs = torch.log_softmax(scores, -1)  # (B, N)
         loss = self.loss_fn(probs, labels)
-        return loss, scores
+        return loss, probs.argmax(1)
 
     def forward_decoder(self, z: torch.Tensor, l: torch.Tensor, labels: torch.Tensor):
         """Decoder
@@ -258,12 +258,12 @@ class MetaModel(nn.Module):
 
         Returns:
             loss: (1,).
-            acc: (1,).
+            preds: (B,).
             parameters: (B, N, E).
         """
         parameters = self.decode(z)  # parameters: (B, N, E)
-        loss, scores = self.predict(l, parameters, labels)
-        return loss, scores, parameters
+        loss, preds = self.predict(l, parameters, labels)
+        return loss, preds, parameters
 
     def inner_loop(
             self, data: Dict[str, torch.Tensor], 
@@ -280,13 +280,13 @@ class MetaModel(nn.Module):
 
         # initialize z', Forward Decoder
         z_prime = s_z
-        s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
+        s_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
         # inner adaptation to z
         for i in range(n_inner_step):
             z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
             z_prime = z_prime - self.inner_lr * z_prime.grad.data
-            s_loss, s_scores, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
+            s_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
 
         # Stop Gradient: 
         # z_prime.requires_grad == False
@@ -296,7 +296,9 @@ class MetaModel(nn.Module):
         
         # Record
         self.recorder.update('Support_Loss', s_loss)
-        self.recorder.update('Support_Accuracy', s_scores, s_labels)
+        self.recorder.update('Support_Accuracy', s_preds, s_labels)
+        self.recorder.update('Support_Precision', s_preds, s_labels)
+        self.recorder.update('Support_Recall', s_preds, s_labels)
         self.recorder.update('Inner_LR', float(self.inner_lr))
         self.recorder.update('Finetuning_LR', float(self.finetuning_lr))
         self.recorder.update('Z_Loss', z_loss)
@@ -308,14 +310,18 @@ class MetaModel(nn.Module):
                 parameters.retain_grad()
                 s_loss.backward(retain_graph=True)
                 parameters = parameters - self.finetuning_lr * parameters.grad
-                s_loss, s_scores = self.predict(
+                s_loss, s_preds = self.predict(
                     l=s_l, parameters=parameters, labels=s_labels
                 )
             self.recorder.update('Finetune_Loss', s_loss)
-            self.recorder.update('Finetune_Accuracy', s_scores, s_labels)
+            self.recorder.update('Finetune_Accuracy', s_preds, s_labels)
+            self.recorder.update('Finetune_Precision', s_preds, s_labels)
+            self.recorder.update('Finetune_Recall', s_preds, s_labels)
         else:
             self.recorder.update('Finetune_Loss', torch.zeros_like(s_loss))
-            self.recorder.update('Finetune_Accuracy', torch.zeros_like(s_scores), torch.zeros_like(s_labels))
+            self.recorder.update('Finetune_Accuracy', torch.zeros_like(s_preds), torch.zeros_like(s_labels))
+            self.recorder.update('Finetune_Precision', torch.zeros_like(s_preds), torch.zeros_like(s_labels))
+            self.recorder.update('Finetune_Recall', torch.zeros_like(s_preds), torch.zeros_like(s_labels))
             
         return parameters, kld_loss, z_loss, s_attn
 
@@ -329,15 +335,17 @@ class MetaModel(nn.Module):
         q_labels = data['query_labels']
         
         q_l, *_, q_attn = self.forward_encoder(q_inputs, rt_attn=rt_attn)
-        q_loss, q_scores = self.predict(
+        q_loss, q_preds = self.predict(
             l=q_l, parameters=parameters, labels=q_labels
         )
 
         # Record
         self.recorder.update('Query_Loss', q_loss)
-        self.recorder.update('Query_Accuracy', q_scores, q_labels)
+        self.recorder.update('Query_Accuracy', q_preds, q_labels)
+        self.recorder.update('Query_Precision', q_preds, q_labels)
+        self.recorder.update('Query_Recall', q_preds, q_labels)
 
-        return q_loss, q_scores, q_attn
+        return q_loss, q_preds, q_attn
 
     def cal_total_loss(self, query_loss, kld_loss, z_loss, beta: float, gamma: float, lambda2: float):
         orthogonality_loss = self.orthgonality_constraint(list(self.decoder.parameters())[0])
@@ -350,7 +358,7 @@ class MetaModel(nn.Module):
         return total_loss
 
     def orthgonality_constraint(self, params: torch.Tensor):
-        # purpose: encourages the dimensions of the latend code as well as the decoder network to be maximally expressive
+        # purpose: encourages the dimensions of the latent code as well as the decoder network to be maximally expressive
         # params: (2E, H), 2E = (mean, std)
         p_dot = params.mm(params.transpose(0, 1))
         p_norm = torch.norm(params, dim=1, keepdim=True) + 1e-15
@@ -373,52 +381,10 @@ class MetaModel(nn.Module):
         parameters, kld_loss, z_loss, s_attn = self.inner_loop(
             data, n_inner_step, n_finetuning_step, rt_attn
         )
-        q_loss, q_scores, q_attn = self.query_validate(data, parameters, rt_attn)
+        q_loss, q_preds, q_attn = self.query_validate(data, parameters, rt_attn)
         total_loss = self.cal_total_loss(q_loss, kld_loss, z_loss, beta, gamma, lambda2)
         
-        return total_loss, q_scores, s_attn, q_attn
-
-    # def meta_run(
-    #         self, tasks: Dict[int, StockDataDict],
-    #         beta: float=0.001, 
-    #         gamma: float=1e-9, 
-    #         lambda2: float=0.1, 
-    #         n_inner_step: int=5, 
-    #         n_finetuning_step: int=5, 
-    #         rt_attn: bool=False,
-    #         device: torch.device=torch.device('cpu')
-    #     ):
-    #     # Outer Loop
-    #     all_total_loss = 0.
-    #     self.recorder.reset_window_metrics()
-    #     for window_size, stock_data in tasks.items():
-    #         # stock_data: StockDataDict
-    #         # - query: (n_stocks, B, 1, T, I)
-    #         # - query_labels: (n_stocks, B)
-    #         # - support: (n_stocks, B, N*K[n_support], T, I)
-    #         # - support_labels: (n_stocks, B*N*K)
-    #         stock_data.to(device)
-    #         # Reset record: only update for a single window size with `number of stocks`
-    #         self.recorder.reset()  
-    #         for data in stock_data:
-    #             # Inner Loop
-    #             total_loss, *_ = self(
-    #                 data=data, 
-    #                 beta=beta, 
-    #                 gamma=gamma, 
-    #                 lambda2=lambda2, 
-    #                 n_inner_step=n_inner_step, 
-    #                 n_finetuning_step=n_finetuning_step, 
-    #                 rt_attn=rt_attn
-    #             )
-    #             all_total_loss += total_loss
-
-    #         # Update record for window size 
-    #         self.recorder.update_window_metrics(window_size)
-
-    #     # TODO: calculate average performance of 4 tasks?
-    #     average_total_loss = all_total_loss / len(tasks)
-    #     return average_total_loss
+        return total_loss, q_preds, s_attn, q_attn
 
     def meta_predict(self):
         raise NotImplementedError('TODO')

@@ -97,7 +97,6 @@ class Trainer():
         # - support: (B, N*K[n_support], T, I)
         # - support_labels: (B*N*K)
         
-        #  model.recorder.reset_window_metrics()    
         # Reset record: only update for a single window size with `number of stocks`
         model.recorder.reset()  
         # Task specific Inner and Outer Loop
@@ -115,8 +114,6 @@ class Trainer():
         nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
         optim.step()
         optim_lr.step()
-
-        # model.recorder.update_window_metrics(train_tasks.window_size)
 
         return 
 
@@ -145,11 +142,15 @@ class Trainer():
             logs = model.recorder.compute(prefix)
             
             for log_string, value in logs.items():
+                # Precision, Recall: (2)
                 valid_logs[log_string].append(value)
         pregress.close()
 
         for k, v in valid_logs.items():
-            valid_logs[k] = (np.mean(v), np.std(v))
+            if k.split('_')[-1] in ['Precision', 'Recall']:
+                valid_logs[k] = (np.mean(v, axis=0), np.std(v, axis=0))
+            else:
+                valid_logs[k] = (np.mean(v), np.std(v))
 
         return valid_logs
 
@@ -228,29 +229,20 @@ class Trainer():
         )
         return valid_logs
 
-    def meta_test(self, model, meta_dataset, n_test: int=100, print_log: bool=True):
-        # load model
-        model = model.to(self.device)
-        # test
-        prefix = meta_dataset.meta_type.capitalize()
-        test_logs = self._valid(
-            model=model, meta_dataset=meta_dataset, n_valid=n_test, prefix=prefix
-        )
-        self.log_results(test_logs, prefix, step=0, total_steps=0, print_log=print_log)
-        
-        test_acc_loss = model.recorder.extract_query_loss_acc(test_logs)
-        return test_acc_loss
-
     def log_results(self, logs, prefix, step, total_steps, print_log=False):
         for log_string, value in logs.items():
             if prefix != 'Train':
                 # tuple for (mean, std) at Valid, Test mode
                 value = value[0]
             if self.writer is not None:
-                self.writer.add_scalar(log_string, value, step)
+                if log_string.split('_')[-1] in ['Precision', 'Recall']:
+                    for i, v in enumerate(value):
+                        self.writer.add_scalar(log_string+f': Class {i}', v, step)
+                else:
+                    self.writer.add_scalar(log_string, value, step)
 
         if print_log:
-            only_one_to_print = True if prefix == 'Valid' else False
+            only_one_to_print = True if prefix in ['Valid', 'Test'] else False
 
             def extract(prefix, key, logs):
                 if prefix == 'Train':
@@ -261,12 +253,19 @@ class Trainer():
                     mean = logs[f'{prefix}-{key}'][0]
                     std = None
                 else:
-                    # prefix-***
+                    # Valid-***, Test-***
                     mean, std = logs[f'{prefix}-{key}']
-                    
-                s = f'{mean:.4f}'
-                if std is not None:
-                    s += f' +/- {std:.4f}'
+                
+                s = ''
+                if key.split('_')[-1] in ['Precision', 'Recall']:
+                    for i in range(len(mean)):
+                        s += f' (Class {i}) {mean[i]:.4f}'
+                        if std is not None:
+                            s += f' +/- {std[i]:.4f}'
+                else:
+                    s += f'{mean:.4f}'
+                    if std is not None:
+                        s += f' +/- {std:.4f}'
                 return s
 
             if only_one_to_print:
@@ -276,8 +275,12 @@ class Trainer():
                 print()
             else:
                 s_acc = extract(prefix, 'Support_Accuracy', logs)
+                s_precision = extract(prefix, 'Support_Precision', logs)
+                s_recall = extract(prefix, 'Support_Recall', logs)
                 s_loss = extract(prefix, 'Support_Loss', logs)
                 q_acc = extract(prefix, 'Query_Accuracy', logs)
+                q_precision = extract(prefix, 'Query_Precision', logs)
+                q_recall = extract(prefix, 'Query_Recall', logs)
                 q_loss = extract(prefix, 'Query_Loss', logs)
                 f_acc = extract(prefix, 'Finetune_Accuracy', logs)
                 f_loss = extract(prefix, 'Finetune_Loss', logs)
@@ -288,7 +291,9 @@ class Trainer():
             
                 print(f'[Meta {prefix}]({step+1}/{total_steps})')
                 print(f'  - [Support] Loss: {s_loss}, Accuracy: {s_acc}')
+                print(f'  - [Support] Precision:{s_precision}, Recall:{s_recall}')
                 print(f'  - [Query] Loss: {q_loss}, Accuracy: {q_acc}')
+                print(f'  - [Query] Precision:{q_precision}, Recall:{q_recall}')
                 print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')
                 print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
                 print()
@@ -310,3 +315,16 @@ class Trainer():
         for ds in [meta_trainset, meta_validset_time, meta_validset_stock, meta_validset_mix]:
             fig = self.plot_q_dist(meta_dataset=ds)
             self.writer.add_figure(f'Query Distribution: {ds.meta_type}', fig)
+
+    def meta_test(self, model, meta_dataset, n_test: int=100, print_log: bool=True):
+        # load model
+        model = model.to(self.device)
+        # test
+        prefix = meta_dataset.meta_type.capitalize()
+        test_logs = self._valid(
+            model=model, meta_dataset=meta_dataset, n_valid=n_test, prefix=prefix
+        )
+        self.log_results(test_logs, prefix, step=0, total_steps=0, print_log=print_log)
+        
+        test_acc_loss = model.recorder.extract_query_loss_acc(test_logs)
+        return test_acc_loss

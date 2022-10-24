@@ -1,33 +1,31 @@
 data_dir: '../data'
 dtype: 'kdd17'
-batch_size: 5
+batch_size: 64
 n_lag: 1
-n_support: 2  # number of support example in each class
+n_support: 3
 n_classes: 2
-n_query: 1
 window_sizes: [15]
 
 feature_size: 11  
-embed_size: 5
-hidden_size: 3
-output_size: 2 
-num_layers: 2
+embed_size: 32
+hidden_size: 32
+num_layers: 1
 drop_rate: 0.0  
 inner_lr_init: 1
 finetuning_lr_init: 0.1
 
-exp_name: 'kdd17-baseline'
+exp_name: 'kdd17_baseline'
 log_dir: './logging'
-total_steps: 100000
-n_inner_step: 5
+total_steps: 70000
+n_inner_step: 10
 n_finetuning_step: 0
 n_valid_step: 10
-every_valid_step: 500
+every_valid_step: 500  # 0 for valid after all training
 beta: 0.001  
-gamma: 1.0e-8  
-lambda1: 1.0e-9  
-lambda2: 0.1 
-outer_lr: 1.0e-4
+gamma: 1.0e-8 
+lambda1: 1.0e-8 
+lambda2: 0.1
+outer_lr: 1.0e-3
 clip_value: 0.1
-device: 'cuda'
+device: 'cpu'
 print_step: 250

@@ -26,12 +26,13 @@ class ARGProcessor():
         }
         return cls_kwargs
 
-
 class MetricRecorder(nn.Module):
     def __init__(self):
         super().__init__()
         cs = tm.MetricCollection({
             'Accuracy': tm.Accuracy(), 
+            'Precision': tm.Precision(num_classes=2, average=None), 
+            'Recall': tm.Recall(num_classes=2, average=None), 
             'Loss': tm.SumMetric()
         })
         self.metrics = tm.MetricCollection([
@@ -47,17 +48,12 @@ class MetricRecorder(nn.Module):
             }, postfix='_Loss')
         ])
 
-        # self.reset_window_metrics()
-
     @property
     def keys(self):
         return list(self.metrics.keys())
 
-    # def reset_window_metrics(self):
-    #     self.window_metrics = defaultdict(dict)
-
     def update(self, key, scores=None | torch.FloatTensor, targets=None | torch.LongTensor):
-        if 'Accuracy' in key:
+        if key.split('_')[-1] in ['Accuracy', 'Precision', 'Recall']:
             if targets is None:
                 raise KeyError('Must insert `targets` to calculate accuracy.')
             self.metrics[key].update(scores, targets)
@@ -76,40 +72,6 @@ class MetricRecorder(nn.Module):
     def reset(self):
         for k in self.keys:
             self.metrics[k].reset()
-
-    # def update_window_metrics(self, window_size):
-    #     results = self.compute()
-    #     self.window_metrics[window_size] = results
-
-    # def get_window_metrics(self, window_size):
-    #     return self.window_metrics[window_size]
-
-    # def compute_total_metrics(self):
-    #     # averaged by number of window size
-    #     windows, metrics = list(zip(*self.window_metrics.items()))
-    #     results = {k: 0.0 for k in self.keys}
-    #     for m in metrics:
-    #         for k in self.keys:
-    #             results[k] += m[k]
-    #     for k in self.keys:
-    #         results[k] /= len(windows)  # TODO: calculate average performance of 4 tasks?
-
-    #     return results
-
-    # def get_log_data(self, prefix: str, window_size: int | None=None):
-    #     log_string = f'{prefix}'
-    #     if window_size is not None:
-    #         log_string += f'-WinSize={window_size}'
-    #         metrics = self.get_window_metrics(window_size)
-    #     else:
-    #         metrics = self.compute_total_metrics()
-
-    #     log_data = {}
-    #     for key in self.keys:
-    #         value = metrics[key]
-    #         log_data[f'{log_string}-{key}'] = value
-
-    #     return log_data
 
     def extract_query_loss_acc(self, logs: Dict[str, float] | List[Dict[str, float]]) -> Dict[str, Tuple[float, float]]:
         to_filter = ['Query_Accuracy', 'Query_Loss']
