@@ -88,6 +88,7 @@ class MetaModel(nn.Module):
         # Network
         self.dropout = nn.Dropout(drop_rate)
         self.lstm_encoder = LSTMAttention(feature_size, embed_size, num_layers)
+        self.layer_norm = nn.LayerNorm(embed_size)
         self.encoder = nn.Linear(embed_size, hidden_size)
         self.relation_net = RelationNet(hidden_size)
         self.decoder = nn.Linear(hidden_size, 2*embed_size, bias=False)
@@ -146,6 +147,7 @@ class MetaModel(nn.Module):
         inputs = inputs.view(B*M, T, I)  # (B*M, T, I) 
         inputs = self.dropout(inputs)
         encoded, attn = self.lstm_encoder(inputs, rt_attn)  # (B*N*K, E), (B*N*K, T)
+        encoded = self.layer_norm(encoded)
         encoded = encoded.view(B, M, -1)  # (B, N*K, E)
         if rt_attn:
             attn = attn.view(B, M, -1)  # (B, N*K, T)

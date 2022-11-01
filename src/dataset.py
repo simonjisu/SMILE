@@ -62,7 +62,8 @@ class StockDataDict(dict):
         self._set_state('numpy')
         for key in self.keys():
             tvalue = self.__getitem__(key)
-            self.__setitem__(key, tvalue.detach().numpy())
+            if not isinstance(tvalue, np.ndarray): 
+                self.__setitem__(key, tvalue.detach().numpy())
 
     def __str__(self):
         s = f'StockDataDict(T={self.window_size}, {self.state})\n'

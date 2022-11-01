@@ -19,6 +19,7 @@ pandas = "*"
 tqdm = "*"
 pyyaml = "*"
 torchmetrics = "*"
+seaborn = "*"
 
 [dev-packages]
 torch-tb-profiler = "*"

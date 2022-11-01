@@ -2,7 +2,7 @@ data_dir: './data'
 dtype: 'kdd17'
 batch_size: 64
 n_lag: 1
-n_support: 3
+n_support: 1
 n_classes: 2
 window_sizes: [15]
 
@@ -10,7 +10,7 @@ feature_size: 11
 embed_size: 32
 hidden_size: 32
 num_layers: 1
-drop_rate: 0.0  
+drop_rate: 0.1  
 inner_lr_init: 1
 finetuning_lr_init: 0.1
 
