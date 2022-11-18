@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import math
 from typing import Dict
 from .utils import MetricRecorder
 from .dataset import StockDataDict
@@ -73,6 +74,7 @@ class MetaModel(nn.Module):
             num_layers: int, 
             drop_rate: float, 
             inner_lr_init: float,
+            inner_lr_schedular_gamma: float,
             param_l2_lambda: float,
             device: str
         ):
@@ -81,6 +83,7 @@ class MetaModel(nn.Module):
         self.output_size = n_classes
         
         self.inner_lr = inner_lr_init # nn.Parameter(torch.FloatTensor([inner_lr_init]))
+        self.inner_lr_schedular_gamma = inner_lr_schedular_gamma
         self.param_l2_lambda = param_l2_lambda
         # Network
         self.dropout = nn.Dropout(drop_rate)
@@ -284,22 +287,40 @@ class MetaModel(nn.Module):
         s_l, s_z, kld_loss, s_attn = self.forward_encoder(s_inputs, rt_attn=rt_attn)
 
         # initialize z', Forward Decoder
-        z_prime = s_z
+        z_prime = s_z.detach()
+        z_prime.requires_grad_(True)
         s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
         s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
+
+        # Check the gradient flow: must set requires_grad to True to use optimizer
+        # print(f's_z: {s_z.requires_grad} | z_prime = {z_prime.requires_grad}')
+        # print(f's_z: {s_z.is_leaf} | z_prime = {z_prime.is_leaf}')
+        # s_z: True | z_prime = True
+        # s_z: False | z_prime = True
+
         # inner adaptation to z
+        inner_optimizer = torch.optim.SGD([z_prime], lr=self.inner_lr)
+        inner_scheduler = torch.optim.lr_scheduler.ExponentialLR(inner_optimizer, gamma=self.inner_lr_schedular_gamma)
+        # inner_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        #     inner_optimizer, T_0=math.floor(n_inner_step/4), T_mult=2, eta_min=0.001)
         for i in range(n_inner_step):
-            z_prime.retain_grad()
+            inner_optimizer.zero_grad()
+            # equal to: z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
-            z_prime = z_prime - self.inner_lr * z_prime.grad.data
+            inner_optimizer.step()
+            inner_scheduler.step()
+            # similar to: z_prime = z_prime - scheduler(self.inner_lr) * z_prime.grad.data
             s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
             s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
 
         # Stop Gradient: 
-        # z_prime.requires_grad == False
-        # s_z.requires_grad == True
         z_prime = z_prime.detach()
         z_loss = torch.mean((z_prime - s_z)**2)
+        # Check the gradient flow
+        # print(f's_z: {s_z.requires_grad} | z_prime = {z_prime.requires_grad}')
+        # print(f's_z: {s_z.is_leaf} | z_prime = {z_prime.is_leaf}')
+        # s_z: True | z_prime = False
+        # s_z: False | z_prime = True
         
         # Record
         self.recorder.update('Support_Loss', s_loss)
