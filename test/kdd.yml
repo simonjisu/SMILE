@@ -9,14 +9,15 @@ window_sizes: [15]
 feature_size: 11  
 embed_size: 32
 num_layers: 1
-drop_rate: 0.1  
+drop_rate: 0.1
 inner_lr_init: 0.1
 param_l2_lambda: 1.0e-2
+inner_lr_schedular_gamma: 0.9
 
 exp_name: 'kdd17_0'
 log_dir: './logging'
 total_steps: 70000
-n_inner_step: 3
+n_inner_step: 10
 n_valid_step: 10
 every_valid_step: 500  # 0 for valid after all training
 beta: 0.001  
