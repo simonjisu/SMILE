@@ -69,29 +69,29 @@ class MetaModel(nn.Module):
             self, 
             feature_size: int, 
             embed_size: int,
-            hidden_size: int, 
             n_classes: int,  # only should be number of classes
             num_layers: int, 
             drop_rate: float, 
             inner_lr_init: float,
-            finetuning_lr_init: float,
+            param_l2_lambda: float,
             device: str
         ):
         super().__init__()
-        self.hidden_size = hidden_size
         self.embed_size = embed_size
         self.output_size = n_classes
         
-        self.inner_lr = nn.Parameter(torch.FloatTensor([inner_lr_init]))
-        self.finetuning_lr = nn.Parameter(torch.FloatTensor([finetuning_lr_init]))
-
+        self.inner_lr = inner_lr_init # nn.Parameter(torch.FloatTensor([inner_lr_init]))
+        self.param_l2_lambda = param_l2_lambda
         # Network
         self.dropout = nn.Dropout(drop_rate)
-        self.lstm_encoder = LSTMAttention(feature_size, embed_size, num_layers)
+        self.lstm_encoder = LSTMAttention(input_size=feature_size, hidden_size=embed_size, num_layers=num_layers)
         self.layer_norm = nn.LayerNorm(embed_size)
-        self.encoder = nn.Linear(embed_size, hidden_size)
-        self.relation_net = RelationNet(hidden_size)
-        self.decoder = nn.Linear(hidden_size, 2*embed_size, bias=False)
+        self.encoder = nn.Sequential(
+            nn.Linear(embed_size, 2*embed_size),
+            nn.ELU()
+        )
+        # self.relation_net = RelationNet(hidden_size)
+        self.decoder = nn.Linear(embed_size, 2*embed_size, bias=False)
 
         # Loss
         # self.loss_fn = nn.CrossEntropyLoss()
@@ -186,10 +186,13 @@ class MetaModel(nn.Module):
             if rt_attn:
                 attn = attn.view(B, N, K, -1)  # attn: (B, N, K, T)
             l_reshape = l.view(B, N, K, -1)  # l_reshape: (B, N, K, E)
+            # -----------------------------
             # Encoder-to-z
-            e = self.encoder(l_reshape)  # e: (B, N, K, H)
-            hs = self.relation_net(e)  # hs: (B, N, 2H)
-            z, kld_loss = self.sample(hs, size=self.hidden_size)  # z: (B, N, H)
+            e = self.encoder(l_reshape)  # e: (B, N, K, 2E)
+            # hs = self.relation_net(e)  # hs: (B, N, 2H)
+            # -----------------------------
+            hs = e.mean(2)  # hs: (B, N, 2E)
+            z, kld_loss = self.sample(hs, size=self.embed_size)  # z: (B, N, E)
             return l, z, kld_loss, attn
         else:
             # forward query
@@ -221,12 +224,12 @@ class MetaModel(nn.Module):
         - H: hidden size
 
         Args:
-            z: (B, N, H). sampled parameters for each class.
+            z: (B, N, E). sampled parameters for each class.
 
         Returns:
             parameters: (B, N, E). $\theta$
         """
-        param_hs = self.decoder(z)  # param_hs: (B, N, 2H)
+        param_hs = self.decoder(z)  # param_hs: (B, N, 2E)
         fan_in = self.embed_size  # E
         fan_out = self.output_size  # N
         std_offset = np.sqrt(2. / (fan_out + fan_in))
@@ -245,7 +248,8 @@ class MetaModel(nn.Module):
         scores = l.bmm(theta).squeeze(1).view(-1, N)
         probs = torch.log_softmax(scores, -1)  # (B, N)
         loss = self.loss_fn(probs, labels)
-        return loss, probs.argmax(1)
+        param_l2_loss = (parameters**2).mean()
+        return loss, probs.argmax(1), param_l2_loss
 
     def forward_decoder(self, z: torch.Tensor, l: torch.Tensor, labels: torch.Tensor):
         """Decoder
@@ -264,13 +268,12 @@ class MetaModel(nn.Module):
             parameters: (B, N, E).
         """
         parameters = self.decode(z)  # parameters: (B, N, E)
-        loss, preds = self.predict(l, parameters, labels)
-        return loss, preds, parameters
+        pred_loss, preds, param_l2_loss = self.predict(l, parameters, labels)
+        return pred_loss, param_l2_loss, preds, parameters
 
     def inner_loop(
             self, data: Dict[str, torch.Tensor], 
             n_inner_step: int=5, 
-            n_finetuning_step: int=5, 
             rt_attn: bool=False
         ):
         self._mode_query(False)
@@ -282,49 +285,32 @@ class MetaModel(nn.Module):
 
         # initialize z', Forward Decoder
         z_prime = s_z
-        s_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
+        s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
+        s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
         # inner adaptation to z
         for i in range(n_inner_step):
             z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
             z_prime = z_prime - self.inner_lr * z_prime.grad.data
-            s_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
+            s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
+            s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
 
         # Stop Gradient: 
         # z_prime.requires_grad == False
         # s_z.requires_grad == True
-        z_prime = z_prime.detach()  
+        z_prime = z_prime.detach()
         z_loss = torch.mean((z_prime - s_z)**2)
         
         # Record
         self.recorder.update('Support_Loss', s_loss)
+        self.recorder.update('Support_ParamL2Loss', s_param_l2_loss)
+        self.recorder.update('Support_PredLoss', s_pred_loss)
         self.recorder.update('Support_Accuracy', s_preds, s_labels)
         self.recorder.update('Support_Precision', s_preds, s_labels)
         self.recorder.update('Support_Recall', s_preds, s_labels)
-        self.recorder.update('Inner_LR', float(self.inner_lr))
-        self.recorder.update('Finetuning_LR', float(self.finetuning_lr))
         self.recorder.update('Z_Loss', z_loss)
         self.recorder.update('KLD_Loss', kld_loss)
 
-        # finetuning adaptation to parameters
-        if n_finetuning_step > 0:
-            for i in range(n_finetuning_step):
-                parameters.retain_grad()
-                s_loss.backward(retain_graph=True)
-                parameters = parameters - self.finetuning_lr * parameters.grad
-                s_loss, s_preds = self.predict(
-                    l=s_l, parameters=parameters, labels=s_labels
-                )
-            self.recorder.update('Finetune_Loss', s_loss)
-            self.recorder.update('Finetune_Accuracy', s_preds, s_labels)
-            self.recorder.update('Finetune_Precision', s_preds, s_labels)
-            self.recorder.update('Finetune_Recall', s_preds, s_labels)
-        else:
-            self.recorder.update('Finetune_Loss', torch.zeros_like(s_loss))
-            self.recorder.update('Finetune_Accuracy', torch.zeros_like(s_preds), torch.zeros_like(s_labels))
-            self.recorder.update('Finetune_Precision', torch.zeros_like(s_preds), torch.zeros_like(s_labels))
-            self.recorder.update('Finetune_Recall', torch.zeros_like(s_preds), torch.zeros_like(s_labels))
-            
         return parameters, kld_loss, z_loss, s_attn
 
     def query_validate(
@@ -337,12 +323,14 @@ class MetaModel(nn.Module):
         q_labels = data['query_labels']
         
         q_l, *_, q_attn = self.forward_encoder(q_inputs, rt_attn=rt_attn)
-        q_loss, q_preds = self.predict(
+        q_pred_loss, q_preds, q_param_l2_loss = self.predict(
             l=q_l, parameters=parameters, labels=q_labels
         )
-
+        q_loss = q_pred_loss + self.param_l2_lambda * q_param_l2_loss
         # Record
         self.recorder.update('Query_Loss', q_loss)
+        self.recorder.update('Query_ParamL2Loss', q_param_l2_loss)
+        self.recorder.update('Query_PredLoss', q_pred_loss)
         self.recorder.update('Query_Accuracy', q_preds, q_labels)
         self.recorder.update('Query_Precision', q_preds, q_labels)
         self.recorder.update('Query_Recall', q_preds, q_labels)
@@ -377,11 +365,10 @@ class MetaModel(nn.Module):
             gamma: float=1e-9, 
             lambda2: float=0.1, 
             n_inner_step: int=5, 
-            n_finetuning_step: int=5, 
             rt_attn: bool=False
         ):
         parameters, kld_loss, z_loss, s_attn = self.inner_loop(
-            data, n_inner_step, n_finetuning_step, rt_attn
+            data, n_inner_step, rt_attn
         )
         q_loss, q_preds, q_attn = self.query_validate(data, parameters, rt_attn)
         total_loss = self.cal_total_loss(q_loss, kld_loss, z_loss, beta, gamma, lambda2)

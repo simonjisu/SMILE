@@ -16,7 +16,6 @@ class Trainer():
             log_dir: str, 
             total_steps: int,
             n_inner_step: int, 
-            n_finetuning_step: int, 
             n_valid_step: int,
             every_valid_step: int,
             beta: float,
@@ -32,7 +31,6 @@ class Trainer():
         self.print_step = print_step
         self.total_steps = total_steps
         self.n_inner_step = n_inner_step
-        self.n_finetuning_step = n_finetuning_step
         self.n_valid_step = n_valid_step
         self.every_valid_step = every_valid_step
         
@@ -83,12 +81,10 @@ class Trainer():
         model, 
         meta_dataset: Dict[int, StockDataDict], 
         optim, 
-        optim_lr
         ):
         # Meta Train
         model.meta_train()
         optim.zero_grad()
-        optim_lr.zero_grad()
         train_tasks = meta_dataset.generate_tasks()  # StockDataDict
         train_tasks.to(self.device)
         # train_tasks: StockDataDict
@@ -106,14 +102,12 @@ class Trainer():
             gamma=self.gamma, 
             lambda2=self.lambda2, 
             n_inner_step=self.n_inner_step, 
-            n_finetuning_step=self.n_finetuning_step, 
             rt_attn=False
         )
         total_loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
         nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
         optim.step()
-        optim_lr.step()
 
         return 
 
@@ -136,7 +130,6 @@ class Trainer():
                 gamma=self.gamma, 
                 lambda2=self.lambda2, 
                 n_inner_step=self.n_inner_step, 
-                n_finetuning_step=self.n_finetuning_step, 
                 rt_attn=False
             )
             logs = model.recorder.compute(prefix)
@@ -165,17 +158,13 @@ class Trainer():
         ):
         
         model = model.to(self.device)
-        lr_list = ['inner_lr', 'finetuning_lr']
-        params = [x[1] for x in list(filter(lambda k: k[0] not in lr_list, model.named_parameters()))]
-        lr_params = [x[1] for x in list(filter(lambda k: k[0] in lr_list, model.named_parameters()))]
-        optim = torch.optim.Adam(params, lr=self.outer_lr, weight_decay=self.lambda1)
-        optim_lr = torch.optim.Adam(lr_params, lr=self.outer_lr, weight_decay=self.lambda1)
+        optim = torch.optim.Adam(model.parameters(), lr=self.outer_lr, weight_decay=self.lambda1)
         
         best_eval_f1 = 0.0
 
         for step in range(self.total_steps):
             # Meta Train
-            self.outer_loop(model, meta_dataset=meta_trainset, optim=optim, optim_lr=optim_lr)
+            self.outer_loop(model, meta_dataset=meta_trainset, optim=optim)
 
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 prefix = 'Train'
@@ -278,23 +267,24 @@ class Trainer():
                 s_precision = extract(prefix, 'Support_Precision', logs)
                 s_recall = extract(prefix, 'Support_Recall', logs)
                 s_loss = extract(prefix, 'Support_Loss', logs)
+                s_param_l2_loss = extract(prefix, 'Support_ParamL2Loss', logs)
+                s_pred_loss = extract(prefix, 'Support_PredLoss', logs)
                 q_acc = extract(prefix, 'Query_Accuracy', logs)
                 q_precision = extract(prefix, 'Query_Precision', logs)
                 q_recall = extract(prefix, 'Query_Recall', logs)
                 q_loss = extract(prefix, 'Query_Loss', logs)
-                f_acc = extract(prefix, 'Finetune_Accuracy', logs)
-                f_loss = extract(prefix, 'Finetune_Loss', logs)
+                q_param_l2_loss = extract(prefix, 'Query_ParamL2Loss', logs)
+                q_pred_loss = extract(prefix, 'Query_PredLoss', logs)
                 kld_loss = extract(prefix, 'KLD_Loss', logs)
                 oth_loss = extract(prefix, 'Orthogonality_Loss', logs)
                 z_loss = extract(prefix, 'Z_Loss', logs)
                 total_loss = extract(prefix, 'Total_Loss', logs)
             
                 print(f'[Meta {prefix}]({step+1}/{total_steps})')
-                print(f'  - [Support] Loss: {s_loss}, Accuracy: {s_acc}')
+                print(f'  - [Support] Loss: {s_loss}, ParamL2Loss: {s_param_l2_loss}, PredLoss: {s_pred_loss}, Accuracy: {s_acc}')
                 print(f'  - [Support] Precision:{s_precision}, Recall:{s_recall}')
-                print(f'  - [Query] Loss: {q_loss}, Accuracy: {q_acc}')
+                print(f'  - [Query] Loss: {q_loss}, ParamL2Loss: {q_param_l2_loss}, PredLoss: {q_pred_loss}, Accuracy: {q_acc}')
                 print(f'  - [Query] Precision:{q_precision}, Recall:{q_recall}')
-                print(f'  - [Finetune] Loss: {f_loss}, Accuracy: {f_acc}')
                 print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
                 print()
 

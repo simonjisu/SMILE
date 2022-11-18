@@ -33,13 +33,19 @@ class MetricRecorder(nn.Module):
             'Accuracy': tm.Accuracy(), 
             'Precision': tm.Precision(num_classes=2, average=None), 
             'Recall': tm.Recall(num_classes=2, average=None), 
-            'Loss': tm.SumMetric()
+            'Loss': tm.SumMetric(),
+            'ParamL2Loss': tm.SumMetric(),
+            'PredLoss': tm.SumMetric()
         })
+        # cs_query = tm.MetricCollection({
+        #     'Accuracy': tm.Accuracy(), 
+        #     'Precision': tm.Precision(num_classes=2, average=None), 
+        #     'Recall': tm.Recall(num_classes=2, average=None), 
+        #     'Loss': tm.SumMetric(),
+        # })
         self.metrics = tm.MetricCollection([
-            cs.clone('Support_'), cs.clone('Query_'), cs.clone('Finetune_'),
-            tm.MetricCollection({
-                'Inner': tm.MeanMetric(), 'Finetuning': tm.MeanMetric()
-            }, postfix='_LR'),
+            cs.clone('Support_'), 
+            cs.clone('Query_'),
             tm.MetricCollection({
                 'Total': tm.SumMetric(), 
                 'KLD': tm.SumMetric(), 

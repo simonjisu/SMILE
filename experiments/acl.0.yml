@@ -8,17 +8,15 @@ window_sizes: [5]
 
 feature_size: 11  
 embed_size: 16
-hidden_size: 16
 num_layers: 1
 drop_rate: 0.1  
 inner_lr_init: 1
-finetuning_lr_init: 0.1
+param_l2_lambda: 1.0e-5
 
 exp_name: 'acl18_0'
 log_dir: './logging'
 total_steps: 80000
 n_inner_step: 10
-n_finetuning_step: 0
 n_valid_step: 10
 every_valid_step: 500
 beta: 0.01  
