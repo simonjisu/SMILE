@@ -74,7 +74,7 @@ class MetaModel(nn.Module):
             num_layers: int, 
             drop_rate: float, 
             inner_lr_init: float,
-            inner_lr_schedular_gamma: float,
+            # inner_lr_schedular_gamma: float,
             param_l2_lambda: float,
             device: str
         ):
@@ -82,8 +82,8 @@ class MetaModel(nn.Module):
         self.embed_size = embed_size
         self.output_size = n_classes
         
-        self.inner_lr = inner_lr_init # nn.Parameter(torch.FloatTensor([inner_lr_init]))
-        self.inner_lr_schedular_gamma = inner_lr_schedular_gamma
+        self.inner_lr = nn.Parameter(torch.FloatTensor([inner_lr_init])) # inner_lr_init
+        # self.inner_lr_schedular_gamma = inner_lr_schedular_gamma
         self.param_l2_lambda = param_l2_lambda
         # Network
         self.dropout = nn.Dropout(drop_rate)
@@ -299,8 +299,8 @@ class MetaModel(nn.Module):
         # s_z: False | z_prime = True
 
         # inner adaptation to z
-        inner_optimizer = torch.optim.SGD([z_prime], lr=self.inner_lr)
-        inner_scheduler = torch.optim.lr_scheduler.ExponentialLR(inner_optimizer, gamma=self.inner_lr_schedular_gamma)
+        inner_optimizer = torch.optim.SGD([z_prime], lr=float(self.inner_lr))
+        # inner_scheduler = torch.optim.lr_scheduler.ExponentialLR(inner_optimizer, gamma=self.inner_lr_schedular_gamma)
         # inner_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         #     inner_optimizer, T_0=math.floor(n_inner_step/4), T_mult=2, eta_min=0.001)
         for i in range(n_inner_step):
@@ -308,7 +308,7 @@ class MetaModel(nn.Module):
             # equal to: z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
             inner_optimizer.step()
-            inner_scheduler.step()
+            # inner_scheduler.step()
             # similar to: z_prime = z_prime - scheduler(self.inner_lr) * z_prime.grad.data
             s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
             s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
@@ -329,6 +329,7 @@ class MetaModel(nn.Module):
         self.recorder.update('Support_Accuracy', s_preds, s_labels)
         self.recorder.update('Support_Precision', s_preds, s_labels)
         self.recorder.update('Support_Recall', s_preds, s_labels)
+        self.recorder.update('InnerLearningRate', float(self.inner_lr))
         self.recorder.update('Z_Loss', z_loss)
         self.recorder.update('KLD_Loss', kld_loss)
 

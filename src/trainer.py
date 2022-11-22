@@ -81,10 +81,12 @@ class Trainer():
         model, 
         meta_dataset: Dict[int, StockDataDict], 
         optimizer, 
+        lr_optimizer
         ):
         # Meta Train
         model.meta_train()
         optimizer.zero_grad()
+        lr_optimizer.zero_grad()
         train_tasks = meta_dataset.generate_tasks()  # StockDataDict
         train_tasks.to(self.device)
         # train_tasks: StockDataDict
@@ -94,7 +96,7 @@ class Trainer():
         # - support_labels: (B*N*K)
         
         # Reset record: only update for a single window size with `number of stocks`
-        model.recorder.reset()  
+        model.recorder.reset()
         # Task specific Inner and Outer Loop
         total_loss, *_ = model(
             data=train_tasks, 
@@ -108,6 +110,7 @@ class Trainer():
         nn.utils.clip_grad_value_(model.parameters(), self.clip_value)
         nn.utils.clip_grad_norm_(model.parameters(), self.clip_value)
         optimizer.step()
+        lr_optimizer.step()
 
         return 
 
@@ -158,12 +161,13 @@ class Trainer():
         ):
         
         model = model.to(self.device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=self.outer_lr, weight_decay=self.lambda1)
+        lr_optimizer = torch.optim.AdamW([p for k, p in model.named_parameters() if k in ['inner_lr']], lr=self.outer_lr)
+        optimizer = torch.optim.AdamW([p for k, p in model.named_parameters() if k not in ['inner_lr']], lr=self.outer_lr, weight_decay=self.lambda1)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=0.001)
         best_eval_f1 = 0.0
         for step in range(self.total_steps):
             # Meta Train
-            self.outer_loop(model, meta_dataset=meta_trainset, optimizer=optimizer)
+            self.outer_loop(model, meta_dataset=meta_trainset, optimizer=optimizer, lr_optimizer=lr_optimizer)
 
             if (step % self.print_step == 0) or (step == self.total_steps-1):
                 prefix = 'Train'

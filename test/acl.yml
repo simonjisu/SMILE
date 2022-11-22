@@ -10,9 +10,9 @@ feature_size: 11
 embed_size: 16
 num_layers: 1
 drop_rate: 0.1  
-inner_lr_init: 1
-param_l2_lambda: 1.0e-5
-inner_lr_schedular_gamma: 0.9
+inner_lr_init: 1.0
+param_l2_lambda: 0.0  # if 0.0 then no 
+# inner_lr_schedular_gamma: 0.9
 
 exp_name: 'acl18_0'
 log_dir: './logging'

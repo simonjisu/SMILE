@@ -51,7 +51,10 @@ class MetricRecorder(nn.Module):
                 'KLD': tm.SumMetric(), 
                 'Z': tm.SumMetric(),
                 'Orthogonality': tm.SumMetric()
-            }, postfix='_Loss')
+            }, postfix='_Loss'),
+            tm.MetricCollection({
+                'InnerLearningRate': tm.MeanMetric()
+            })
         ])
 
     @property
