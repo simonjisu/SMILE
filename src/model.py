@@ -287,8 +287,7 @@ class MetaModel(nn.Module):
         s_l, s_z, kld_loss, s_attn = self.forward_encoder(s_inputs, rt_attn=rt_attn)
 
         # initialize z', Forward Decoder
-        z_prime = s_z.detach()
-        z_prime.requires_grad_(True)
+        z_prime = s_z
         s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
         s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
 
@@ -299,17 +298,19 @@ class MetaModel(nn.Module):
         # s_z: False | z_prime = True
 
         # inner adaptation to z
-        inner_optimizer = torch.optim.SGD([z_prime], lr=float(self.inner_lr))
+        # inner_optimizer = torch.optim.SGD([z_prime], lr=float(self.inner_lr))
         # inner_scheduler = torch.optim.lr_scheduler.ExponentialLR(inner_optimizer, gamma=self.inner_lr_schedular_gamma)
         # inner_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         #     inner_optimizer, T_0=math.floor(n_inner_step/4), T_mult=2, eta_min=0.001)
         for i in range(n_inner_step):
-            inner_optimizer.zero_grad()
-            # equal to: z_prime.retain_grad()
+            # inner_optimizer.zero_grad()
+            # equal to: 
+            z_prime.retain_grad()
             s_loss.backward(retain_graph=True)
-            inner_optimizer.step()
+            # inner_optimizer.step()
             # inner_scheduler.step()
             # similar to: z_prime = z_prime - scheduler(self.inner_lr) * z_prime.grad.data
+            z_prime = z_prime - self.inner_lr * z_prime.grad.data
             s_pred_loss, s_param_l2_loss, s_preds, parameters = self.forward_decoder(z=z_prime, l=s_l, labels=s_labels)
             s_loss = s_pred_loss + self.param_l2_lambda * s_param_l2_loss
 

@@ -282,6 +282,7 @@ class Trainer():
                 oth_loss = extract(prefix, 'Orthogonality_Loss', logs)
                 z_loss = extract(prefix, 'Z_Loss', logs)
                 total_loss = extract(prefix, 'Total_Loss', logs)
+                inner_lr = extract(prefix, 'InnerLearningRate', logs)
             
                 print(f'[Meta {prefix}]({step+1}/{total_steps})')
                 print(f'  - [Support] Loss: {s_loss}, ParamL2Loss: {s_param_l2_loss}, PredLoss: {s_pred_loss}, Accuracy: {s_acc}')
@@ -289,6 +290,7 @@ class Trainer():
                 print(f'  - [Query] Loss: {q_loss}, ParamL2Loss: {q_param_l2_loss}, PredLoss: {q_pred_loss}, Accuracy: {q_acc}')
                 print(f'  - [Query] Precision:{q_precision}, Recall:{q_recall}')
                 print(f'  - [Loss] Z: {z_loss}, KLD: {kld_loss}, Orthogonality: {oth_loss}, Total: {total_loss}')
+                print(f'  - [InnerLR] LR {inner_lr}')
                 print()
 
     def plot_q_dist(self, meta_dataset):
